@@ -1,0 +1,41 @@
+DINS WHISPERSHELL ORIGINAL | COMPLETE FOUNDATION, STEPS 01-05
+===========================================================
+
+ONE-FOLDER portable setup. When you are ready:
+
+1. Make/open DINS-WhisperShell-ORIGINAL on your Windows PC or USB stick.
+2. Extract THIS ZIP directly into that folder. No nested top folder.
+3. Keep the entire modules/, architecture/, docs/, templates/, tools/ tree together.
+4. Double-click START_WHISPERSHELL.cmd, or run: python WhisperShell.py
+5. First visit "Master Blueprint" to view the original ten schematics translated
+   into a tracked inventory of what's implemented, planned or research-only.
+6. After that, "Block Workshop" is ready to inspect/create expandable blocks.
+
+The current complete archive includes working foundation files:
+  modules/shared_field.py         Live expandable blocks in portable SQLite
+  modules/template_bridge.py     Whole Shared Field profiles on demand
+  WhisperShell.py                GUI with Builder, model choice, Block Workshop,
+                                 Script drafts and Master Blueprint
+  tools/block_builder.py         Same Shared Field block API from the CLI
+  tools/blueprint_audit.py       Read-only architecture audit
+  architecture/blueprint.json    Machine-readable ORIGINAL design / statuses
+  docs/MASTER_BLUEPRINT.md       Plans, past findings, contracts and roadmap
+  docs/schematics/              Ten original user schematics, unchanged
+  tests/test_foundation.py       12 passing automated regression checks
+
+Still to integrate, step by step: original First Sight, Hearing, Touch, Response,
+Delta Voice, Resident/brain memory layers, First Mind, First Ache, VisuShell,
+MCP/robotics/adapters and customer export. Plans in the UI are NOT execution.
+
+Python 3.10+ with standard-library tkinter/sqlite3 is required currently.
+No virtual environment or Miniconda is required; portable Python packaging
+is a later option. Tests do not prove a Windows display/robot is working.
+
+No saved Shared Field sqlite database, API keys or personal memory is in the ZIP.
+The app creates runtime data in its own folder when needed. Any existing
+shared_field.sqlite3 file remains untouched by extraction.
+
+The ORIGINAL private source is not on GitHub yet; the private repository was
+listed, but the API write returned 404. Local Git archive provided separately.
+
+ONE archive. One extraction. One working module at a time from here.

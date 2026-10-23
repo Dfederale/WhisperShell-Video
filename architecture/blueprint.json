@@ -1,0 +1,694 @@
+{
+  "format": "DINS.WhisperShell.Original.Blueprint",
+  "schema_version": 1,
+  "updated": "2026-10-21",
+  "private_original": true,
+  "purpose": "Persistent machine-readable map of the body/mind architecture, original schematics, implementation maturity and unfinished tasks. This manifest documents intentions and implementation status; it does not activate capabilities.",
+  "status_vocabulary": {
+    "implemented_tested": "Has source and automated foundation checks on development machine, not automatically end-to-end hardware or Windows GUI proof.",
+    "partial_tested": "Some subfeatures genuinely exist/test; listed downstream integrations do not.",
+    "planned_integration": "Original capability exists in historical work and/or schematic; not yet integrated into this version.",
+    "designed": "Design established conceptually; executable module not yet integrated or verified.",
+    "research_only": "Exploratory concept. No working integration claimed."
+  },
+  "principles": [
+    "WhisperShell = BODY; Resident = MIND. They have different duties and memory.",
+    "Shared Field = LIVE common communication/state with permanently identified independently attachable expandable blocks; Template Bridge = explicit WHOLE-FIELD snapshot/restore (muscle memory), NOT a live relay.",
+    "No module requires another specific optional module simply to retain its own state. Detached blocks survive and rejoin as named.",
+    "First Sight perceives; First Touch executes; First Response determines human authorization; Delta Voice handles voice; WhisperShell orchestrates.",
+    "Mind provenance, associative/sequential memory, ping observation, SHA thread and Jumpcore are NOT stored as Template Bridge profiles or used as Shared Field intermodule transport.",
+    "Stable connection codes and versioned contracts, never repurpose a code for an unrelated module. A connection code is not a credential.",
+    "Full identical foundation across portable devices; hardware decides activation and Resident placement, NOT existence of foundational interfaces.",
+    "Private original has full builder and controlled developer boxes. Customer builds carry identical Shared Field and Template Bridge source, with reduced options and same module identities.",
+    "Portable one-folder startup with relative paths, no mandatory virtualenv or Conda. External model/runtime/adapters only on demand.",
+    "CPU-first, event-driven modules; optional heavyweight capabilities remain dormant until requested/available.",
+    "Safety and permissions are not suggestions: no unapproved arbitrary execution or physical motion. Independent device-level STOP, then rethink.",
+    "Treat schematics as architectural concepts and reference plans, NOT proof an entire stack currently runs."
+  ],
+  "profiles": [
+    "default",
+    "robotics",
+    "custom"
+  ],
+  "architecture_boundaries": {
+    "body": "Perception/action/workflow, deterministic local functions, live coordination through Shared Field and explicit snapshots through Template Bridge.",
+    "mind": "Swappable Resident, provenance/relationship/sequence memories, SHA, ping, Jumpcore, model reasoning.",
+    "support": "System awareness/health, VisuShell semantic interpretation, Reality Bridge authoritative reality updates.",
+    "adapter": "External models, network references, group MCP, legacy/CD-i and hardware. Optional, not core hard-dependencies.",
+    "tooling": "Private development and packaging, not included wholesale in consumer editions."
+  },
+  "module_connection_policy": {
+    "confirmed_codes": [
+      "DINS.WHISPERSHELL.ORCHESTRATOR"
+    ],
+    "other_connection_codes": "RESERVED ON INTEGRATION. Reuse codes from original working modules; DO NOT invent new codes merely because a diagram names a module.",
+    "expansion": "Any module may grow its JSON object with new keys without a fixed block size, preserving unrelated module namespaces.",
+    "ownership": "Namespace separation is conventional in the current foundation; authenticated per-module write ownership is a future security task."
+  },
+  "diagram_index": [
+    {
+      "number": 1,
+      "file": "docs/schematics/01_complete_architecture.png",
+      "summary": "Full architecture and capabilities: inputs, core orchestration, Monitor, perception, execution, builder, profiles, safety."
+    },
+    {
+      "number": 2,
+      "file": "docs/schematics/02_first_ache.png",
+      "summary": "First Ache: lightweight vitality monitor and adaptive workload governor."
+    },
+    {
+      "number": 3,
+      "file": "docs/schematics/03_mcp_group.png",
+      "summary": "MCP group: multi-model parallel participation and guided dialogue in shared context."
+    },
+    {
+      "number": 4,
+      "file": "docs/schematics/04_genesis_bootstrap.png",
+      "summary": "Genesis: portable bootstrap, discover capabilities, compatibility paths, and optional legacy execution."
+    },
+    {
+      "number": 5,
+      "file": "docs/schematics/05_cdi_visushell_8k.png",
+      "summary": "Philips CD-i 1994 engine concept, VisuShell interpretation, live multiplayer and 8K aspirations."
+    },
+    {
+      "number": 6,
+      "file": "docs/schematics/06_visushell_v4.png",
+      "summary": "Reality -> perception -> semantic interpretation -> Shared Metadata/Field -> Shared Reality -> execution."
+    },
+    {
+      "number": 7,
+      "file": "docs/schematics/07_multimodal_di.png",
+      "summary": "Degrees of Integration multimodal engine research, adjustable modality emphasis."
+    },
+    {
+      "number": 8,
+      "file": "docs/schematics/08_cloud_reference.png",
+      "summary": "Local and optional cloud factchecker, cloud as reference, MCP discussion, local control."
+    },
+    {
+      "number": 9,
+      "file": "docs/schematics/09_embodiment.png",
+      "summary": "Embodiment roles: First Mind resource map, First Ache workload, Sight/Hearing/Touch/Response."
+    },
+    {
+      "number": 10,
+      "file": "docs/schematics/10_first_mind.png",
+      "summary": "First Mind: filesystem/storage spatial map and resource visibility."
+    }
+  ],
+  "components": [
+    {
+      "id": "shared_field",
+      "name": "Shared Field",
+      "region": "body",
+      "path": "modules/shared_field.py",
+      "phase": "implemented_tested",
+      "description": "Live common state; expandable JSON objects keyed by module connection codes; stored in SQLite; revision-based polling, atomic updates. Not semantic interpretation itself.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06"
+      ],
+      "tags": [
+        "muscle_memory",
+        "shared_state",
+        "live"
+      ],
+      "integration": null
+    },
+    {
+      "id": "template_bridge",
+      "name": "Template Bridge",
+      "region": "body",
+      "path": "modules/template_bridge.py",
+      "phase": "implemented_tested",
+      "description": "Captures/restores ALL Shared Field blocks plus legacy commands/action_map/permissions. Not a live router, translator or AI memory.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06"
+      ],
+      "tags": [
+        "muscle_memory",
+        "snapshots"
+      ],
+      "integration": null
+    },
+    {
+      "id": "orchestrator",
+      "name": "WhisperShell / Monitor",
+      "region": "body",
+      "path": "WhisperShell.py",
+      "phase": "partial_tested",
+      "description": "Private orchestrator GUI, profile selection, model picker config, draft scripts and Block Workshop are implemented; automatic task planning, real execution and Resident calls are not. Name WhisperShell privately; Monitor can label commercial host.",
+      "connection_code": "DINS.WHISPERSHELL.ORCHESTRATOR",
+      "sources": [
+        "01",
+        "09"
+      ],
+      "tags": [
+        "host",
+        "private_builder"
+      ],
+      "integration": null
+    },
+    {
+      "id": "block_workshop",
+      "name": "Expandable Block Workshop",
+      "region": "tooling",
+      "path": "tools/block_builder.py",
+      "phase": "implemented_tested",
+      "description": "CLI and private GUI tool to create, inspect, expand and set block keys through the same Shared Field API.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06"
+      ],
+      "tags": [
+        "development"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_sight",
+      "name": "First Sight",
+      "region": "body",
+      "path": "modules/first_sight.py",
+      "phase": "planned_integration",
+      "description": "Screen/camera capture, OCR, interface buttons/regions, markers and coordinates, sight packets, change detection. Reuse prior working implementations; do not replace with manual-only target definitions.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06",
+        "09"
+      ],
+      "tags": [
+        "perception"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_hearing",
+      "name": "First Hearing",
+      "region": "body",
+      "path": "modules/first_hearing.py",
+      "phase": "planned_integration",
+      "description": "Speech transcription and audio event perception, microphones and optional recording.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06",
+        "09"
+      ],
+      "tags": [
+        "perception"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_touch",
+      "name": "First Touch",
+      "region": "body",
+      "path": "modules/first_touch.py",
+      "phase": "planned_integration",
+      "description": "GUI, keyboard, desktop, devices, approved actions; private PowerShell/CMD/Python script tools live here. Do not execute from orchestrator independently.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06",
+        "09"
+      ],
+      "tags": [
+        "actuation",
+        "controlled_execution"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_response",
+      "name": "First Response",
+      "region": "body",
+      "path": "modules/first_response.py",
+      "phase": "planned_integration",
+      "description": "Permissions, human approval, user/profile authority and override. Not the speech synthesizer.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "06",
+        "09"
+      ],
+      "tags": [
+        "authorization"
+      ],
+      "integration": null
+    },
+    {
+      "id": "delta_voice",
+      "name": "Delta Voice",
+      "region": "body",
+      "path": "modules/delta_voice.py",
+      "phase": "planned_integration",
+      "description": "Speech output and voice/persona communication bridge, not primary orchestrator. Preserve historical markup/voice conventions when integrating.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "09"
+      ],
+      "tags": [
+        "voice"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_ache",
+      "name": "First Ache",
+      "region": "support",
+      "path": "modules/first_ache.py",
+      "phase": "designed",
+      "description": "Low-cost performance/health governor: CPU/RAM/GPU/disk/network/temperature/battery/latency/queue signals, workload guidance and constrained safe modes. Score, thresholds, adaptive throttling all require calibration/tests.",
+      "connection_code": null,
+      "sources": [
+        "02",
+        "09"
+      ],
+      "tags": [
+        "resource_governor"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_mind",
+      "name": "First Mind (resource map)",
+      "region": "support",
+      "path": "modules/first_mind.py",
+      "phase": "designed",
+      "description": "Filesystem spatial/storage map, where space is free, what is growing, safe candidate reports. DISTINCT from the Resident mind. Read-only by default; no delete/cleanup without authority.",
+      "connection_code": null,
+      "sources": [
+        "09",
+        "10"
+      ],
+      "tags": [
+        "resources",
+        "spatial_map"
+      ],
+      "integration": null
+    },
+    {
+      "id": "visushell",
+      "name": "VisuShell semantic interpretation",
+      "region": "support",
+      "path": "modules/visushell.py",
+      "phase": "designed",
+      "description": "Interpret raw observations into entities, relations, context, events and meaning; not Template Bridge.",
+      "connection_code": null,
+      "sources": [
+        "05",
+        "06"
+      ],
+      "tags": [
+        "semantic_layer"
+      ],
+      "integration": null
+    },
+    {
+      "id": "reality_bridge",
+      "name": "Reality Bridge",
+      "region": "support",
+      "path": "modules/reality_bridge.py",
+      "phase": "designed",
+      "description": "Controlled external-world state writer/boundary; Resident observers should not silently rewrite reality records.",
+      "connection_code": null,
+      "sources": [
+        "06",
+        "09"
+      ],
+      "tags": [
+        "reality_state"
+      ],
+      "integration": null
+    },
+    {
+      "id": "first_voice",
+      "name": "First Voice",
+      "region": "body",
+      "path": "modules/first_voice.py",
+      "phase": "designed",
+      "description": "Voice interaction adapter if distinct from First Hearing and Delta Voice; confirm historical interface before implementation.",
+      "connection_code": null,
+      "sources": [
+        "06"
+      ],
+      "tags": [
+        "voice"
+      ],
+      "integration": null
+    },
+    {
+      "id": "monitor_board",
+      "name": "Monitor execution board",
+      "region": "body",
+      "path": "modules/monitor_board.py",
+      "phase": "designed",
+      "description": "Human-readable current goal, next action, steps, timers, results and status; not a replacement for Shared Field.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "execution_board"
+      ],
+      "integration": null
+    },
+    {
+      "id": "goal_manager",
+      "name": "Goal manager",
+      "region": "body",
+      "path": "modules/goal_manager.py",
+      "phase": "designed",
+      "description": "Decompose goals into steps, track progress; explicit user authorization for consequential actions.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "planning"
+      ],
+      "integration": null
+    },
+    {
+      "id": "workflow_engine",
+      "name": "Workflow engine",
+      "region": "body",
+      "path": "modules/workflow_engine.py",
+      "phase": "designed",
+      "description": "Sequence jobs, branches, loops and conditions, preserve resumable states.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "automation"
+      ],
+      "integration": null
+    },
+    {
+      "id": "event_scheduler",
+      "name": "Event and schedule engine",
+      "region": "body",
+      "path": "modules/event_scheduler.py",
+      "phase": "designed",
+      "description": "Trigger handling, filters, timers, watch jobs and scheduling; run selectively on CPU.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "automation"
+      ],
+      "integration": null
+    },
+    {
+      "id": "resident",
+      "name": "Resident model adapter",
+      "region": "mind",
+      "path": "mind/resident.py",
+      "phase": "planned_integration",
+      "description": "Swappable local model or model API. Model selection UI is present but no inference connected. Mind can reside elsewhere while the same local body runs.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "07",
+        "08",
+        "09"
+      ],
+      "tags": [
+        "reasoning"
+      ],
+      "integration": null
+    },
+    {
+      "id": "associative_memory",
+      "name": "Associative memory",
+      "region": "mind",
+      "path": "mind/associative_memory.py",
+      "phase": "designed",
+      "description": "Relationships learned from experiences, semantic associations and links. Separate from operating Shared Field.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "07"
+      ],
+      "tags": [
+        "experience"
+      ],
+      "integration": null
+    },
+    {
+      "id": "sequential_memory",
+      "name": "Sequential memory",
+      "region": "mind",
+      "path": "mind/sequential_memory.py",
+      "phase": "designed",
+      "description": "Order/timing of episodes and actions. Use temporal identifiers and links.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "07"
+      ],
+      "tags": [
+        "experience"
+      ],
+      "integration": null
+    },
+    {
+      "id": "provenance",
+      "name": "Provenance layer",
+      "region": "mind",
+      "path": "mind/provenance.py",
+      "phase": "designed",
+      "description": "Origin and lineage of acquired knowledge and experience; separate from Git source hashes and Shared Field revision.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "07"
+      ],
+      "tags": [
+        "experience"
+      ],
+      "integration": null
+    },
+    {
+      "id": "ping_observation",
+      "name": "Ping / observation layer",
+      "region": "mind",
+      "path": "mind/ping_observation.py",
+      "phase": "designed",
+      "description": "Mind-side observation cycle and assessment of returned evidence; First Sight/Hearing provide inputs.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "09"
+      ],
+      "tags": [
+        "experience"
+      ],
+      "integration": null
+    },
+    {
+      "id": "sha_thread",
+      "name": "SHA thread",
+      "region": "mind",
+      "path": "mind/sha_thread.py",
+      "phase": "designed",
+      "description": "Mind-side trace of intent/action/observation/consequence; NOT the transport for live Shared Field module messages. Exact message structure to verify from prior work.",
+      "connection_code": null,
+      "sources": [
+        "01",
+        "09"
+      ],
+      "tags": [
+        "experience"
+      ],
+      "integration": null
+    },
+    {
+      "id": "jumpcore",
+      "name": "Jumpcore ∆T71",
+      "region": "mind",
+      "path": "mind/jumpcore.py",
+      "phase": "designed",
+      "description": "LEAP -> BACKFILL -> CONTRA -> VERIFY for proposals and checking contradictions; not a substitute for execution authorization.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "reasoning"
+      ],
+      "integration": null
+    },
+    {
+      "id": "reflex",
+      "name": "REFLEX / continuation",
+      "region": "mind",
+      "path": "mind/reflex.py",
+      "phase": "designed",
+      "description": "Continuation and context support; integrate earlier implementation when available, not invented afresh.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "continuity"
+      ],
+      "integration": null
+    },
+    {
+      "id": "factchecker_local",
+      "name": "Local factchecker",
+      "region": "mind",
+      "path": "mind/factchecker_local.py",
+      "phase": "designed",
+      "description": "Check available trustworthy local evidence before optional remote sources. Do not confuse confidence with proof.",
+      "connection_code": null,
+      "sources": [
+        "08"
+      ],
+      "tags": [
+        "verification"
+      ],
+      "integration": null
+    },
+    {
+      "id": "factchecker_cloud",
+      "name": "Cloud reference adapter",
+      "region": "adapter",
+      "path": "adapters/cloud_reference.py",
+      "phase": "designed",
+      "description": "Optional remote reference/retrieval tools with clear provenance and consent, returns data, not autonomous control.",
+      "connection_code": null,
+      "sources": [
+        "08"
+      ],
+      "tags": [
+        "network",
+        "optional"
+      ],
+      "integration": null
+    },
+    {
+      "id": "mcp_group",
+      "name": "MCP group of Residents",
+      "region": "adapter",
+      "path": "adapters/mcp_group.py",
+      "phase": "designed",
+      "description": "Optional parallel multi-model participation and disagreement; user directs. Cost/latency/rate limits and source checks required.",
+      "connection_code": null,
+      "sources": [
+        "03",
+        "08"
+      ],
+      "tags": [
+        "group_reasoning",
+        "optional"
+      ],
+      "integration": null
+    },
+    {
+      "id": "genesis",
+      "name": "Genesis portable bootstrap",
+      "region": "adapter",
+      "path": "adapters/genesis.py",
+      "phase": "designed",
+      "description": "Hardware inventory, tier/adapters and optional runtime support. The full original does NOT require Conda or a mandatory managed environment; relative-folder boot is primary.",
+      "connection_code": null,
+      "sources": [
+        "04"
+      ],
+      "tags": [
+        "boot",
+        "optional"
+      ],
+      "integration": null
+    },
+    {
+      "id": "multimodal_di",
+      "name": "Multimodal DI research adapter",
+      "region": "adapter",
+      "path": "adapters/multimodal_di.py",
+      "phase": "research_only",
+      "description": "Proposed degree-of-focus between text/image/audio/video/sensors and decoder outputs; no universal generator is implemented.",
+      "connection_code": null,
+      "sources": [
+        "07"
+      ],
+      "tags": [
+        "research",
+        "optional"
+      ],
+      "integration": null
+    },
+    {
+      "id": "legacy_cdi",
+      "name": "CD-i / retro runtime adapter",
+      "region": "adapter",
+      "path": "adapters/legacy_cdi.py",
+      "phase": "research_only",
+      "description": "Future reverse-engineering or authorized emulation interface for 1994 CD-i legacy content, upscaling and shared clients; not implemented and not automatic via Windows compatibility.",
+      "connection_code": null,
+      "sources": [
+        "04",
+        "05"
+      ],
+      "tags": [
+        "legacy",
+        "research"
+      ],
+      "integration": null
+    },
+    {
+      "id": "robotics",
+      "name": "Robotics adapter",
+      "region": "adapter",
+      "path": "adapters/robotics.py",
+      "phase": "designed",
+      "description": "Later optional wheel/arm/gripper/sensor interfaces only once software body is learned and safe operation established; independent local stop controls.",
+      "connection_code": null,
+      "sources": [
+        "09"
+      ],
+      "tags": [
+        "actuation",
+        "optional"
+      ],
+      "integration": null
+    },
+    {
+      "id": "custom_build_export",
+      "name": "Customer edition builder",
+      "region": "tooling",
+      "path": "tools/build_customer.py",
+      "phase": "designed",
+      "description": "Future selective packager retaining SAME core Shared Field/Template Bridge code and original module connection codes, removing private workshop and unused functions. Not implemented.",
+      "connection_code": null,
+      "sources": [
+        "01"
+      ],
+      "tags": [
+        "private_builder"
+      ],
+      "integration": null
+    }
+  ],
+  "build_order": [
+    "Foundation: Shared Field + Template Bridge + private orchestrator / Block Workshop (present, isolate Windows GUI testing).",
+    "Reconnect ORIGINAL First Sight from proven historical implementation, preserving behavior and its connection language.",
+    "Reconnect First Hearing then First Touch (guarded actions/script boxes), First Response authorization and Delta Voice.",
+    "Connect Resident API/local model adapters, then provenance, associative/sequential memory, observation, SHA and Jumpcore individually.",
+    "Integrate lightweight First Mind and First Ache; VisuShell semantic processing and Reality Bridge with explicit evidence contracts.",
+    "Connect optional factcheckers/MCP, hardware and legacy bridges when useful. Expand into robotics after body/environment learning and safety verification.",
+    "Build selective customer packager using identical foundation code, while retaining private original source and tools."
+  ]
+}

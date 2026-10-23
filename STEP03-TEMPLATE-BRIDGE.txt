@@ -1,0 +1,41 @@
+DINS WhisperShell ORIGINAL | Template Bridge wired
+=================================================
+
+Extract this add-on ZIP directly into your existing
+DINS-WhisperShell-ORIGINAL folder.
+
+It contains:
+  modules/template_bridge.py  (new)
+  WhisperShell.py             (updated; overwrite earlier orchestrator)
+  STEP03-TEMPLATE-BRIDGE.txt  (these instructions)
+
+It DOES NOT replace modules/shared_field.py, delete your modules, or contain
+a shared_field.sqlite3 database. Your existing Shared Field remains intact.
+
+RUN:
+  python WhisperShell.py
+
+Original Builder tab:
+  - Choose Default / Robotics / Custom.
+  - Capture complete profile: save ALL current Shared Field blocks.
+  - Apply saved profile: restore captured state into LIVE Shared Field.
+  - The first time a profile is used, CAPTURE before APPLY. No fake presets.
+
+Optional commands:
+  python WhisperShell.py --status
+  python WhisperShell.py --templates
+  python WhisperShell.py --capture default
+  python WhisperShell.py --apply default
+
+Snapshots are saved inside templates/<name>/shared_field.json.
+They include disconnected modules' blocks. Restoring preserves brand-new
+blocks that weren't present in an older snapshot, rather than deleting them.
+Modules receive updated data by reading/polling the Shared Field, not via the
+Template Bridge. The orchestrator applies and captures; it is not yet an AI
+runtime. The Resident and First Touch execution remain separate later steps.
+
+Nothing is configured for specific robotics hardware yet. Robotics is simply
+a named slot for a complete Field snapshot, exactly like Default or Custom.
+
+Tested in an isolated copied folder with save, mutation, restore, disconnected
+blocks, preservation of added blocks, listing, and missing-profile handling.
