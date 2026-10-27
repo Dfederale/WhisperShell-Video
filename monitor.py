@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -356,37 +357,256 @@ def _save_json(path: Path, data: dict):
 # Builder lives inside Monitor, using whichever Resident is already connected.
 # It never installs packages or runs generated scripts without an explicit operator action.
 BUILDER_PROJECTS = ROOT / "data" / "builder_projects"
+
+# Each connected Resident route keeps its own project files. The onscreen
+# injector remains an independent external-chat workflow and is not captured.
+BUILDER_ROUTE_FOLDERS = {"local": "LOCAL_AI", "api": "API_AI"}
+
+
+def builder_route_directory(route: str) -> Path:
+    """Return the fixed workspace belonging to a Resident route."""
+    if route not in BUILDER_ROUTE_FOLDERS:
+        raise ValueError("Unknown Builder project route")
+    return BUILDER_PROJECTS / BUILDER_ROUTE_FOLDERS[route]
+
+
+def builder_project_directory(route: str, name: str) -> Path:
+    """Keep names plain and prevent paths escaping their assigned route."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,70}", name):
+        raise ValueError("Project folder name may contain letters, digits, hyphens and underscores")
+    return builder_route_directory(route) / name
+
+
+def builder_prepare_route_project(route: str, name: str) -> Path:
+    """Create only the directories appropriate to this output route."""
+    folder = builder_project_directory(route, name)
+    subfolders = ("source", "responses") if route == "local" else (
+        "source", "documentation", "images", "instructions", "responses")
+    for subfolder in subfolders:
+        (folder / subfolder).mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def builder_record_response(project_root: Path, relative: str, content: str) -> Path:
+    """Store the returned AI text verbatim, without interpreting or executing it."""
+    destination = builder_project_path(project_root, relative)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".builder_tmp")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(destination)
+    return destination
+
+
+def builder_pack_api_project(project_root: Path) -> Path:
+    """Package existing files after API steps complete; never fabricate an image."""
+    from zipfile import ZIP_DEFLATED, ZipFile
+    root = project_root.resolve()
+    if not root.is_dir() or root.parent.name != BUILDER_ROUTE_FOLDERS["api"]:
+        raise ValueError("Not an API Builder project folder")
+    archive = root / (root.name + ".zip")
+    temporary = root / (root.name + ".zip.builder_tmp")
+    try:
+        with ZipFile(temporary, "w", compression=ZIP_DEFLATED) as zipped:
+            for directory in sorted(root.rglob("*")):
+                if directory.is_symlink():
+                    continue
+                relative = directory.relative_to(root)
+                named = (Path(root.name) / relative).as_posix()
+                if directory.is_dir():
+                    if not any(directory.iterdir()):
+                        zipped.writestr(named + "/", "")
+                elif directory.is_file() and directory not in (temporary, archive):
+                    zipped.write(directory, arcname=named)
+        with ZipFile(temporary) as zipped:
+            if zipped.testzip() is not None:
+                raise RuntimeError("Generated project ZIP failed integrity verification")
+        temporary.replace(archive)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return archive
 BUILDER_DEFAULT_PROMPT = """Hello, welcome to Digital Intelligence Neuromorphic Systems (DINS).
 
 This system was made by Ferenna (AI) and her partner Dennis (human).
 
-What we want to ask of you is to create a small application following the guidelines presented to you.
+You are DINS Builder, a project-building assistant working with DINS WhisperShell Monitor.
 
-You are DINS Builder, a coding assistant working with the selected local AI or API AI in DINS Monitor.
+Your task is to create real, downloadable project files following the user's request. Do not merely describe how files could be created.
 
-Your capabilities are:
-1. FOLDER SETUP: Create the requested project folder and suitable subfolders.
-2. SMALL SCRIPTS: Write small Python, CMD or PowerShell scripts when appropriate.
-3. README: Explain what the application does and how to start it.
-4. SMALL MODIFICATIONS: Read and change existing code without damaging unrelated sections.
-5. VERIFICATION: Check files, inspect errors and report actual test results.
+YOUR CAPABILITIES:
 
-These are CAPABILITIES, not a fixed five-step limit. Choose as many steps as the task requires.
-Do one small, understandable task per step and preserve existing project files.
-Work inside the selected project workspace. Do not assume that describing a file creates it.
-Only the Builder's confirmed file tools can actually make or modify files.
-Never claim a file was created, modified, run or tested without confirmation.
-Honor the chosen operating system, system RAM and application RAM budget.
-Prefer lightweight libraries and avoid unnecessary background processes.
+ONE - PROJECT ZIP: Create an actual downloadable ZIP archive containing the complete project folder structure and necessary subfolders. The archive must extract into one clearly named project folder. Include placeholder files where necessary to preserve empty folders. Provide a clickable download link to the ZIP. A JSON mkdir instruction is NOT a substitute for the ZIP.
 
-When asked for a PLAN, act ONLY as PROJECT PLANNER. Your first response must contain numbered instructions to yourself, NOT code. Do NOT include source code, file contents, headings, Markdown, code fences, explanations or unnecessary features. Every instruction will be returned to you individually by the DINS WhisperShell injector. When receiving an individual instruction, act as BUILDER and complete only that step. Do not generate another numbered plan.
-EVERY instruction line must start with its consecutive number, a dot and one space.
-Separate every instruction with ONE blank line. Start with 1. Do not add headers,
-code fences, bullets, or explanations outside the numbered instructions.
+TWO - SOURCE FILES: Decide how many Python (.py) files the project requires. Create each file with its complete working source code and provide it as a downloadable file when file-creation tools are available. Use CMD, PowerShell, or other necessary files when appropriate. State the total number of Python files.
 
-When asked to COMPLETE A STEP, return only the requested JSON action object.
-Builder will preview proposed file actions and ask the human before applying them.
-"""
+THREE - CONNECTIONS: If the project requires communication between modules, create a Shared Field or Template Bridge and its necessary files. Do not introduce unnecessary modules or dependencies.
+
+FOUR - SETUP SCHEMATIC: Use the onscreen AI's built-in IMAGE GENERATOR to create a rendered image showing the project's actual folder structure, modules, connections, and assembly order. Display the generated image and provide it as a downloadable image if supported. Do NOT generate SVG, HTML, Python drawing code, ASCII art, or any other substitute for the image generator. If image generation is unavailable, report that clearly rather than substituting another format.
+
+FIVE - README: Create a downloadable README.md explaining the application, requirements, dependencies, file locations, and launch commands.
+
+SIX - FINAL ASSEMBLY: The LAST numbered plan instruction must produce a complete on-screen assembly guide. Explain how to download and extract the ZIP, which files to place in which folders, how to connect modules, and how to start the application. The user must be able to assemble the entire project using the previous outputs.
+
+IMPORTANT FILE CREATION RULES:
+
+When working through an onscreen AI interface with file-creation tools, actually create the requested files and downloadable attachments.
+
+When instructed to create the project ZIP, generate the real ZIP archive and provide its download link in that step.
+
+Do not replace requested downloadable files with JSON describing mkdir or write operations.
+
+Do not claim a file exists unless it was successfully created.
+
+If file-creation tools are unavailable, state that limitation clearly rather than pretending an archive or downloadable file exists.
+
+When working through a separate Builder route that explicitly requires JSON file actions, follow that route's required JSON protocol. Do not claim those actions produced downloadable attachments.
+
+PROJECT RULES:
+
+Honor the selected operating system, system RAM, and application RAM budget.
+
+Prefer portable, lightweight solutions with minimal dependencies.
+
+Preserve relative paths so projects can be extracted to any drive or folder.
+
+Use as many building steps as necessary. The capability categories are not a fixed step limit.
+
+VERIFY AUTOMATICALLY:
+
+Check generated source files, filenames, imports, folder references, and archive contents whenever the available tools permit.
+
+Report only confirmed verification results.
+
+Verification is NOT a separate numbered plan instruction.
+
+CRITICAL PLAN FORMAT FOR WHISPERSHELL:
+
+When asked for a PLAN, act ONLY as PROJECT PLANNER.
+
+Return ONLY consecutive numbered instructions to yourself.
+
+Every instruction MUST begin with its consecutive number, a dot, and ONE space.
+
+Start at 1 and continue without skipping any numbers.
+
+Each numbered instruction must occupy exactly ONE physical line.
+
+Leave EXACTLY ONE completely blank line between numbered instructions.
+
+Do not include headings, introductions, explanations, code, JSON, Markdown fences, or additional text in PLAN MODE.
+
+The FIRST numbered instruction must request creation of the actual downloadable project ZIP with its folder structure.
+
+Subsequent instructions must request the necessary source files, module connections, schematic, and README.
+
+The LAST numbered instruction must ALWAYS request the final on-screen assembly guide.
+
+Each instruction will be returned to you individually by the DINS WhisperShell injector.
+
+STEP EXECUTION MODE:
+
+When receiving an individual numbered instruction, act as BUILDER.
+
+Complete ONLY that instruction.
+
+Do not generate another numbered plan.
+
+Use available tools to create and deliver real downloadable files when working through the onscreen AI.
+
+Provide the resulting file or download link for that step.
+
+Do not claim success unless the requested operation was actually completed.
+
+After completing the step, await the next instruction from WhisperShell."""
+
+
+# Default prompt texts are seeds for editable .txt presets, not fixed UI resets.
+# The original on-screen Builder contract above is preserved verbatim for both
+# Onscreen and API routes; only the Local route uses a code-only contract.
+BUILDER_LOCAL_CODE_PROMPT = """Hello, welcome to Digital Intelligence Neuromorphic Systems (DINS).
+
+This system was made by Ferenna (AI) and her partner Dennis (human).
+
+You are DINS Builder, working through a connected LOCAL AI Resident in DINS WhisperShell Monitor.
+
+YOUR ROLE:
+Plan and write project SOURCE CODE, scripts, configuration, and documentation as text.
+Choose the number of Python files needed for the user's request and give each file complete working content. Keep the project portable and lightweight for the specified OS and RAM budget.
+
+LOCAL ROUTE OUTPUT CONTRACT:
+- Return only ordinary text, numbered plans, and source-file content in the format requested by Monitor.
+- This route cannot directly produce downloadable ZIP attachments or generated images. Do not promise them or fabricate links.
+- You may describe folder structure, create textual setup instructions, and document how a user can assemble or package the project.
+- Monitor's separate, permission-controlled file writer can create folders and text files from valid JSON mkdir/write operations when explicitly requested. Do not claim any file exists until Monitor reports that its write operation succeeded.
+- Do not use SVG, HTML, ASCII art, or source code as a substitute for an image-generator request.
+- No unrequested package installations, automatic script execution, or external connections.
+
+PLAN MODE:
+Return ONLY consecutive numbered, actionable steps starting at 1.
+Put one instruction per physical line with exactly one blank line between instructions.
+No headings, code fences, JSON, explanations, or claims that work has already completed.
+Include source code, necessary file connections, README, and a final assembly/launch guide.
+Do not add steps requiring image generation or the AI to attach a ZIP.
+
+STEP EXECUTION MODE:
+Complete ONLY the individual numbered step returned by Monitor.
+For the connected Resident Builder route, reply with ONLY a JSON object:
+{"actions":[{"op":"mkdir","path":"subfolder"},{"op":"write","path":"source/main.py","content":"complete file text"}],"report":"short accurate description"}
+Use only mkdir or write, with project-relative forward-slash paths. No shell commands, delete operations, or absolute paths. Return an empty actions list for steps that make no file changes.
+Never claim source files were run, RAM was measured, or a ZIP or image was produced without verification.
+Wait for the next numbered instruction from Monitor."""
+
+BUILDER_PRESET_NAMES = {
+    "onscreen": "DINS Full Builder",
+    "api": "DINS Full Builder",
+    "local": "DINS Local Code",
+}
+
+
+def builder_seed_prompt_presets(choice: str) -> dict[str, Path]:
+    """Seed editable route-specific TXT presets. Never overwrite user changes."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,49}", choice):
+        raise ValueError("Invalid Builder mode")
+    templates = {
+        "onscreen": BUILDER_DEFAULT_PROMPT,
+        "api": BUILDER_DEFAULT_PROMPT,
+        "local": BUILDER_LOCAL_CODE_PROMPT,
+    }
+    PROMPT_FOLDER.mkdir(parents=True, exist_ok=True)
+    seeded = {}
+    for route, content in templates.items():
+        filename = f"{choice.lower()}__{route}__{BUILDER_PRESET_NAMES[route]}.txt"
+        target = PROMPT_FOLDER / filename
+        # Exclusive create preserves custom modifications from previous runs.
+        try:
+            with target.open("x", encoding="utf-8") as handle:
+                handle.write(content)
+        except FileExistsError:
+            pass
+        seeded[route] = target
+    return seeded
+
+
+def builder_list_prompt_presets(choice: str, route: str) -> dict[str, Path]:
+    """Read this route's presets, including legacy presets for online routes."""
+    if route not in BUILDER_PRESET_NAMES:
+        raise ValueError("Unknown Builder prompt route")
+    root = choice.lower() + "__"
+    prefix = root + route + "__"
+    found: dict[str, Path] = {}
+    if not PROMPT_FOLDER.is_dir():
+        return found
+    for path in PROMPT_FOLDER.glob(prefix + "*.txt"):
+        if path.is_file() and not path.is_symlink():
+            found[path.stem[len(prefix):]] = path
+    if route in ("onscreen", "api"):
+        # Preserve presets from the earlier Save Custom release. They weren't
+        # route-specific, so make them available to both online routes.
+        for path in PROMPT_FOLDER.glob(root + "*.txt"):
+            suffix = path.stem[len(root):]
+            if "__" not in suffix and path.is_file() and not path.is_symlink():
+                found.setdefault(suffix, path)
+    return found
 
 
 def builder_parse_steps(raw: str) -> list[str]:
@@ -415,6 +635,461 @@ def builder_parse_steps(raw: str) -> list[str]:
     if any(b - a < 2 for a, b in zip(relevant, relevant[1:])):
         raise ValueError("Insert one blank line between consecutive numbered steps")
     return numbered
+
+
+def builder_ocr_numbered(raw: str) -> list[tuple[int, str]]:
+    """Extract visually wrapped numbered lines, including merged 2./3./4. OCR.
+
+    This stage does NOT decide whether the observed text is a real response.
+    builder_ocr_filter_preprompt makes that decision before any step is queued.
+    """
+    result: list[tuple[int, str]] = []
+    number = None
+    parts: list[str] = []
+
+    def flush():
+        if number is not None and parts:
+            content = " ".join(parts).strip()
+            if len(content) >= 5:
+                result.append((number, content))
+
+    # OCR can glue instructions together on one line, including immediately
+    # after closing quotes. Split only at a numbered prefix followed by text.
+    raw = re.sub(r'(?<![\w\d])([1-9]\d{0,2})[.,)]\s+(?=[A-Za-z])',
+                 r'\n\1. ', raw)
+    # Trim recognizable interface footer text, which is not part of the plan.
+    footer = re.compile(r'(?:chatgpt can make mistakes|check important info|'
+                        r'show more|regenerate response)', re.IGNORECASE)
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        match_footer = footer.search(line)
+        if match_footer:
+            line = line[:match_footer.start()].strip(' \t,.;')
+            if not line:
+                flush()
+                number = None
+                parts = []
+                continue
+        hit = re.match(r"^(\d{1,3})[.)]\s+(.+)$", line)
+        if hit:
+            flush()
+            number = int(hit.group(1))
+            parts = [hit.group(2).strip()]
+        elif not line:
+            flush()
+            number = None
+            parts = []
+        elif number is not None and not line.startswith(("```", ">", "#")):
+            parts.append(line)
+    flush()
+    latest: dict[int, str] = {}
+    for index, content in result:
+        if 1 <= index <= 150:
+            latest[index] = content
+    return sorted(latest.items())
+
+
+def builder_ocr_filter_preprompt(observed: list[tuple[int, str]],
+                                 preprompt: str) -> tuple[list[tuple[int, str]], int]:
+    """Exclude echoed preprompt examples before the OCR plan can reach injector.
+
+    Derive known instructions from the *editable* preprompt rather than assume
+    that the five stock examples are unchanged. Fail closed when an OCR item
+    contains a preprompt numbered item (including merged/inaccurate OCR lines).
+    """
+    from difflib import SequenceMatcher
+    import unicodedata
+
+    def normalize(value: str) -> str:
+        value = unicodedata.normalize('NFKD', value).casefold()
+        return ' '.join(re.findall(r'[a-z0-9]+', value))
+
+    prompt_examples = []
+    prompt_prefixes = []
+    for line in preprompt.splitlines():
+        match = re.match(r'^\s*\d{1,3}[.)]\s+(.+?)\s*$', line)
+        if not match:
+            continue
+        content = normalize(match.group(1))
+        if content:
+            prompt_examples.append(content)
+            # Prefixes such as FOLDER SETUP, SMALL SCRIPTS, README, etc.
+            # survive OCR punctuation corruption and merged lines.
+            label = normalize(match.group(1).split(':', 1)[0])
+            if ':' in match.group(1) and label and len(label) >= 5:
+                prompt_prefixes.append(label)
+    other_prompt_markers = [
+        'you are dins builder', 'these are capabilities',
+        'when asked for a plan', 'when asked to complete a step',
+        'every instruction line', 'plan mode return only',
+    ]
+
+    filtered = []
+    rejected = 0
+    for index, text in observed:
+        candidate = normalize(text)
+        # A real plan may say "Create README.md" or "Verify files".
+        # Only a LABEL AT THE START identifies the preprompt's numbered
+        # capability examples; do not reject ordinary mentions of README.
+        is_echo = any(candidate == label or candidate.startswith(label + ' ')
+                      for label in prompt_prefixes)
+        is_echo = is_echo or any(marker in candidate for marker in other_prompt_markers)
+        if not is_echo:
+            for example in prompt_examples:
+                if (candidate == example or (len(candidate) >= 24 and
+                        SequenceMatcher(None, candidate, example).ratio() >= 0.76)):
+                    is_echo = True
+                    break
+        if is_echo:
+            rejected += 1
+        else:
+            filtered.append((index, text))
+    return filtered, rejected
+
+
+def builder_ocr_instructions(raw: str) -> list[str]:
+    """Compatibility helper for any older caller."""
+    return [step for _, step in builder_ocr_numbered(raw)]
+
+
+def builder_merge_ocr_lines(collected: dict[int, str], observed: list[tuple[int, str]]) -> bool:
+    """Accumulate streaming steps without losing text scrolled out of the OCR region.
+
+    More complete versions of an already-seen step extend the quiet-period timer;
+    shorter OCR glitches don't erase earlier text.
+    """
+    changed = False
+    for number, content in observed:
+        if number < 1 or number > 150:
+            continue
+        previous = collected.get(number, "")
+        if not previous:
+            collected[number] = content
+            changed = True
+        elif content != previous and len(content) > len(previous) + 2:
+            # OCR sometimes changes a letter while streaming. The longer plan wins.
+            collected[number] = content
+            changed = True
+    return changed
+
+
+def builder_ocr_plan_ready(collected: dict[int, str], last_change: float,
+                           now: float, quiet_seconds: float = 20.0) -> bool:
+    """A plan is ready only if it starts at 1, has no gaps and stayed quiet."""
+    if not collected or not last_change or now - last_change < quiet_seconds:
+        return False
+    return sorted(collected) == list(range(1, max(collected) + 1))
+
+
+# Tesseract is a separate Windows executable. Pillow/pytesseract alone are not enough.
+# Keep its path local to Monitor, without changing the system PATH or other modules.
+TESSERACT_PATH_FILE = ROOT / "data" / "memory" / "tesseract_path.txt"
+TESSDATA_PATH_FILE = ROOT / "data" / "memory" / "tessdata_path.txt"
+_TESSERACT_RESOLVED: str | None = None
+
+
+def builder_tesseract_check(candidate: str | Path) -> str | None:
+    """Accept only an executable that identifies itself as Tesseract OCR."""
+    candidate = Path(str(candidate).strip().strip('"')).expanduser()
+    if not candidate.is_file() or candidate.name.lower() != 'tesseract.exe':
+        return None
+    try:
+        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        result = subprocess.run([str(candidate), '--version'], capture_output=True,
+                                text=True, timeout=6, creationflags=flags)
+        details = ((result.stdout or '') + (result.stderr or '')).lower()
+        if result.returncode == 0 and 'tesseract' in details:
+            return str(candidate.resolve())
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def builder_local_tesseract_candidates() -> list[Path]:
+    """Find portable Tesseract next to Monitor, without relying on drive letters.
+
+    Search only named tool folders and their limited-depth subfolders. Do not
+    recursively scan the full WhisperShell installation or its user projects.
+    """
+    candidates: list[Path] = [ROOT / "tesseract.exe"]
+    named_dirs = {"ocr", "tesseract", "tesseract-ocr", "tesseract_ocr"}
+    try:
+        folders = [p for p in ROOT.iterdir() if p.is_dir() and not p.is_symlink()
+                   and p.name.casefold() in named_dirs]
+    except OSError:
+        folders = []
+    for folder in folders:
+        # Common layout: WhisperShell/ocr/tesseract.exe or
+        # WhisperShell/ocr/Tesseract-OCR/tesseract.exe
+        candidates.append(folder / "tesseract.exe")
+        todo = [(folder, 0)]
+        visited = 0
+        while todo and visited < 500:
+            parent, depth = todo.pop(0)
+            visited += 1
+            if depth >= 4:
+                continue
+            try:
+                children = list(parent.iterdir())
+            except (OSError, PermissionError):
+                continue
+            for child in children:
+                if child.is_symlink():
+                    continue
+                if child.is_file() and child.name.casefold() == "tesseract.exe":
+                    candidates.append(child)
+                elif child.is_dir() and child.name.casefold() not in {
+                    "tessdata", "__pycache__", ".git", "models", "logs", "data"
+                }:
+                    todo.append((child, depth + 1))
+    return list(dict.fromkeys(candidates))
+
+
+def builder_find_tesseract() -> str | None:
+    """Prefer a portable OCR executable; fall back to saved/system installations."""
+    global _TESSERACT_RESOLVED
+    # A cached absolute path can become stale when WhisperShell moves to USB or
+    # another drive. Always try its own neighboring OCR tools first.
+    for item in builder_local_tesseract_candidates():
+        resolved = builder_tesseract_check(item)
+        if resolved:
+            _TESSERACT_RESOLVED = resolved
+            return resolved
+    if _TESSERACT_RESOLVED:
+        resolved = builder_tesseract_check(_TESSERACT_RESOLVED)
+        if resolved:
+            return resolved
+    candidates = []
+    if TESSERACT_PATH_FILE.is_file():
+        try:
+            candidates.append(TESSERACT_PATH_FILE.read_text(encoding='utf-8').strip())
+        except OSError:
+            pass
+    if os.getenv('TESSERACT_CMD'):
+        candidates.append(os.environ['TESSERACT_CMD'])
+    which = shutil.which('tesseract.exe') or shutil.which('tesseract')
+    if which:
+        candidates.append(which)
+    for env in ('ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA', 'APPDATA'):
+        base = os.getenv(env)
+        if base:
+            candidates += [Path(base) / 'Tesseract-OCR' / 'tesseract.exe',
+                           Path(base) / 'Programs' / 'Tesseract-OCR' / 'tesseract.exe']
+    candidates += [Path('C:/Program Files/Tesseract-OCR/tesseract.exe'),
+                   Path('C:/Program Files (x86)/Tesseract-OCR/tesseract.exe')]
+    for item in candidates:
+        resolved = builder_tesseract_check(item)
+        if resolved:
+            _TESSERACT_RESOLVED = resolved
+            return resolved
+    return None
+
+
+def builder_set_tesseract_path(path: str, *, remember: bool = False) -> str:
+    """Remember the verified portable OCR executable, without changing global PATH."""
+    global _TESSERACT_RESOLVED
+    resolved = builder_tesseract_check(path)
+    if not resolved:
+        raise RuntimeError('That file is not a working Tesseract OCR executable.')
+    _TESSERACT_RESOLVED = resolved
+    if remember:
+        TESSERACT_PATH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TESSERACT_PATH_FILE.write_text(resolved + '\n', encoding='utf-8')
+    return resolved
+
+
+def builder_find_tessdata(tesseract_exe: str | Path) -> Path | None:
+    """Find portable English OCR language data without relying on the working directory.
+
+    First look around the discovered executable, then inside named OCR folders
+    beside Monitor. A saved absolute path is only a fallback for movable USBs.
+    """
+    exe = Path(tesseract_exe).resolve()
+    candidates: list[Path] = [
+        exe.parent / "tessdata", exe.parent,
+        exe.parent.parent / "tessdata", ROOT / "ocr" / "tessdata",
+        ROOT / "tessdata",
+    ]
+    for name in ("ocr", "tesseract", "tesseract-ocr", "tesseract_ocr"):
+        base = ROOT / name
+        if not base.is_dir() or base.is_symlink():
+            continue
+        todo = [(base, 0)]
+        scanned = 0
+        while todo and scanned < 500:
+            folder, depth = todo.pop(0)
+            scanned += 1
+            candidates.append(folder)
+            if depth >= 5:
+                continue
+            try:
+                children = list(folder.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                if child.is_dir() and not child.is_symlink() and child.name.casefold() not in {
+                    "__pycache__", ".git", "models", "logs", "data"
+                }:
+                    todo.append((child, depth + 1))
+    # Support an existing TESSDATA_PREFIX, but never require a system-wide change.
+    prefix = os.getenv("TESSDATA_PREFIX", "").strip().strip('"')
+    if prefix:
+        candidates.extend((Path(prefix), Path(prefix) / "tessdata"))
+    if TESSDATA_PATH_FILE.is_file():
+        try:
+            candidates.append(Path(TESSDATA_PATH_FILE.read_text(encoding="utf-8").strip()))
+        except OSError:
+            pass
+    for folder in dict.fromkeys(candidates):
+        try:
+            language_file = folder / "eng.traineddata"
+            if language_file.is_file() and language_file.stat().st_size > 0:
+                return folder.resolve()
+        except OSError:
+            pass
+    return None
+
+
+def builder_set_tessdata_path(file: str | Path, *, remember: bool = False) -> Path:
+    """Configure an existing eng.traineddata chosen through the file picker."""
+    selected = Path(file).expanduser()
+    if selected.name.casefold() != "eng.traineddata" or not selected.is_file() or selected.stat().st_size == 0:
+        raise RuntimeError("Select an existing, non-empty eng.traineddata file.")
+    directory = selected.resolve().parent
+    if remember:
+        TESSDATA_PATH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TESSDATA_PATH_FILE.write_text(str(directory) + "\n", encoding="utf-8")
+    return directory
+
+
+class BuilderPIDCleaner:
+    """Track only OCR processes launched by THIS Builder window.
+
+    Windows owns numerical PIDs: a restart gets a fresh one. Keeping Popen
+    handles makes cleanup safe even when Windows reuses unrelated PID numbers.
+    Never enumerate or terminate ChatGPT, Ollama, Monitor, or Windows tasks.
+    """
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._epoch = 0
+        self._children: dict[int, subprocess.Popen] = {}
+
+    def current_epoch(self) -> int:
+        with self._lock:
+            return self._epoch
+
+    def clean(self) -> list[int]:
+        """Cancel old OCR work and terminate any still-running owned child."""
+        with self._lock:
+            self._epoch += 1
+            children = list(self._children.values())
+            self._children.clear()
+        stopped = []
+        for process in children:
+            if process.poll() is None:
+                try:
+                    process.kill()  # Only the exact process WE started.
+                    stopped.append(process.pid)
+                except (OSError, ProcessLookupError):
+                    pass
+            try:
+                process.wait(timeout=0.5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return stopped
+
+    def run(self, arguments: list[str], *, epoch: int, timeout: float = 25.0):
+        """Run one tracked child, rejecting work from a cancelled OCR session."""
+        with self._lock:
+            if epoch != self._epoch:
+                raise RuntimeError("Old OCR session cancelled")
+            # Lock covers creation and registration, so Start cannot race
+            # with a previous OCR thread spawning an untracked process.
+            process = subprocess.Popen(
+                arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            self._children[process.pid] = process
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate()
+                raise
+            with self._lock:
+                if epoch != self._epoch:
+                    raise RuntimeError("Old OCR session cancelled")
+            return subprocess.CompletedProcess(arguments, process.returncode, stdout, stderr)
+        finally:
+            with self._lock:
+                if self._children.get(process.pid) is process:
+                    self._children.pop(process.pid, None)
+
+
+def builder_tesseract_ocr(image, executable: str | Path, language_dir: Path,
+                          *, pid_cleaner: BuilderPIDCleaner | None = None,
+                          pid_epoch: int | None = None) -> str:
+    """Run OCR with an argument list, never quote a Windows folder inside an argument.
+
+    pytesseract uses shlex.split(..., posix=False) on Windows. If a folder is
+    quoted inside its config string, those quote characters can become part
+    of the actual --tessdata-dir argument. A subprocess argument list avoids
+    this entirely, including for portable installations with spaces in paths.
+    The temporary capture file is removed even when OCR fails.
+    """
+    import tempfile
+
+    exe = str(executable)
+    language_dir = Path(language_dir)
+    if not (language_dir / "eng.traineddata").is_file():
+        raise RuntimeError("Tesseract English data is missing: " + str(language_dir / "eng.traineddata"))
+    with tempfile.TemporaryDirectory(prefix="dins_ocr_") as temporary:
+        screenshot = Path(temporary) / "screenshot.png"
+        image.save(screenshot, format="PNG")
+        arguments = [exe, str(screenshot), "stdout", "-l", "eng",
+                     "--psm", "6", "--tessdata-dir", str(language_dir)]
+        try:
+            if pid_cleaner is not None:
+                if pid_epoch is None:
+                    raise ValueError("PID-cleaner OCR requires a session epoch")
+                result = pid_cleaner.run(arguments, epoch=pid_epoch, timeout=25)
+            else:
+                result = subprocess.run(
+                    arguments, capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=25,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"Tesseract OCR could not run: {exc}") from exc
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit code {result.returncode}"
+            raise RuntimeError("Tesseract OCR error: " + detail[:900])
+        return result.stdout
+
+
+def builder_ocr_capture(region: tuple[int, int, int, int],
+                        *, pid_cleaner: BuilderPIDCleaner | None = None,
+                        pid_epoch: int | None = None) -> str:
+    """Capture the selected region and invoke portable Tesseract directly."""
+    try:
+        from PIL import ImageGrab, ImageOps, ImageEnhance
+    except ImportError as exc:
+        raise RuntimeError("Onscreen OCR requires Pillow. Install it with python -m pip install Pillow") from exc
+    path = builder_find_tesseract()
+    if not path:
+        raise RuntimeError('Tesseract OCR executable not found. Press Start to locate tesseract.exe.')
+    tessdata = builder_find_tessdata(path)
+    if tessdata is None:
+        raise RuntimeError("English OCR data (eng.traineddata) not found inside the portable OCR folders.")
+    x, y, w, h = region
+    if w < 10 or h < 10:
+        raise ValueError("Select an OCR rectangle at least 10 x 10 pixels")
+    shot = ImageGrab.grab(bbox=(x, y, x+w, y+h), all_screens=True)
+    image = ImageEnhance.Contrast(ImageOps.grayscale(shot)).enhance(1.8)
+    return builder_tesseract_ocr(image, path, tessdata,
+                                 pid_cleaner=pid_cleaner, pid_epoch=pid_epoch)
 
 
 def builder_decode_actions(raw: str) -> tuple[list[dict], str]:
@@ -499,6 +1174,10 @@ def builder_workspace_context(project_root: Path) -> str:
             continue
         rel = str(entry.relative_to(project_root)).replace("\\", "/")
         if any(p.startswith(".") for p in Path(rel).parts):
+            continue
+        # Builder transcripts and prompts are stored for the operator, not
+        # re-fed as source code: keep the model's context budget for real files.
+        if entry.relative_to(project_root).parts[0] in ("responses", "instructions"):
             continue
         try:
             value = entry.read_text(encoding="utf-8")[:min(2800, budget)]
@@ -602,6 +1281,16 @@ def run_gui():
     except ImportError as exc:
         raise RuntimeError("Tkinter unavailable on this Python installation") from exc
 
+    # Mixed-DPI dual-monitor setups need consistent physical screen coordinates.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        except (OSError, AttributeError, ValueError):
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except (OSError, AttributeError, ValueError):
+                pass
     state = preference_state()
     app = tk.Tk()
     app.title("DINS Monitor")
@@ -627,6 +1316,7 @@ def run_gui():
         bridge_problem = ""
     module_plugins: dict[str, Any] = {}
     events: list[str] = []
+    builder_pid_cleaners: list[BuilderPIDCleaner] = []
 
     def log(message: str):
         events.append(message)
@@ -1075,7 +1765,7 @@ def run_gui():
     app.after(100, resident_poll)
 
 
-    # BUILDER: five independent creation modes, each with its own editable preprompt.
+    # BUILDER: five creation modes, with route-specific editable TXT presets.
     builder = pages["Builder"]
     header(builder, "DINS Builder", "Choose what to create. Each option opens its own planning and step-injection window.")
     ttk.Label(builder, text="The connected Local AI or API AI writes a numbered plan. "
@@ -1109,10 +1799,137 @@ def run_gui():
         top.pack(fill="x", pady=(1, 7))
         prescript = tk.Text(top, height=10, wrap="word", undo=True)
         prescript.pack(fill="x", expand=False)
-        prescript.insert("1.0", BUILDER_DEFAULT_PROMPT)
-        ttk.Button(top, text="Restore default preprompt",
-                   command=lambda: (prescript.delete("1.0", "end"),
-                                    prescript.insert("1.0", BUILDER_DEFAULT_PROMPT))).pack(anchor="e", pady=(5, 0))
+
+        # Separate prompt libraries for Onscreen, API, and Local AI. Changing
+        # routes stores the editor's current text so even UNSAVED work survives
+        # when switching back; Save Custom is the explicit write-to-disk action.
+        try:
+            seeded_presets = builder_seed_prompt_presets(choice)
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("DINS Builder presets", str(exc), parent=window)
+            window.destroy()
+            return
+        route_labels = {"Onscreen AI": "onscreen", "API AI": "api", "Local AI": "local"}
+        prompt_route_var = tk.StringVar(value="Onscreen AI")
+        active_prompt_route = ["onscreen"]
+        prompt_drafts = {}
+        for route, path in seeded_presets.items():
+            try:
+                prompt_drafts[route] = path.read_text(encoding="utf-8")
+            except OSError:
+                prompt_drafts[route] = (BUILDER_LOCAL_CODE_PROMPT if route == "local"
+                                        else BUILDER_DEFAULT_PROMPT)
+        prescript.insert("1.0", prompt_drafts["onscreen"])
+
+        prompt_controls = ttk.Frame(top)
+        prompt_controls.pack(fill="x", pady=(5, 0))
+        ttk.Label(prompt_controls, text="Preprompt for:").pack(side="left", padx=(0, 5))
+        prompt_route_picker = ttk.Combobox(
+            prompt_controls, textvariable=prompt_route_var,
+            values=list(route_labels), state="readonly", width=13)
+        prompt_route_picker.pack(side="left", padx=(0, 8))
+        ttk.Label(prompt_controls, text="Preset:").pack(side="left", padx=(0, 5))
+        custom_name = tk.StringVar(value=BUILDER_PRESET_NAMES["onscreen"])
+        custom_picker = ttk.Combobox(prompt_controls, textvariable=custom_name, width=22)
+        custom_picker.pack(side="left", padx=(0, 6))
+        custom_status = tk.StringVar(value="Onscreen AI preset ready")
+        route_preset_names = {r: BUILDER_PRESET_NAMES[r] for r in BUILDER_PRESET_NAMES}
+        local_notice_shown = [False]
+
+        def local_ai_notice():
+            if local_notice_shown[0]:
+                return
+            local_notice_shown[0] = True
+            messagebox.showinfo(
+                "Local AI Builder",
+                "This route produces code and text. Downloadable ZIP files and "
+                "generated images are not available here.\n\n"
+                "The quality and complexity of the output depend on the selected AI model.",
+                parent=window)
+
+        def current_prompt_text(route: str) -> str:
+            if active_prompt_route[0] == route:
+                return prescript.get("1.0", "end-1c")
+            return prompt_drafts[route]
+
+        def custom_prompt_path(name: str, route: str) -> Path:
+            name = name.strip()
+            if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,59}", name)
+                    or name.endswith((".", " "))):
+                raise ValueError("Use a preset name of 1-60 letters, digits, spaces, dots, - or _.")
+            # Keep legacy files untouched; new saves are route-specific.
+            return PROMPT_FOLDER / f"{choice.lower()}__{route}__{name}.txt"
+
+        def refresh_custom_presets():
+            route = active_prompt_route[0]
+            available = builder_list_prompt_presets(choice, route)
+            custom_picker.configure(values=sorted(available, key=str.casefold))
+
+        def switch_prompt_route(route: str, *, notify_local: bool = True):
+            if route not in BUILDER_PRESET_NAMES:
+                raise ValueError("Unknown Builder prompt route")
+            previous = active_prompt_route[0]
+            prompt_drafts[previous] = prescript.get("1.0", "end-1c")
+            route_preset_names[previous] = custom_name.get()
+            active_prompt_route[0] = route
+            prompt_route_var.set(next(label for label, value in route_labels.items() if value == route))
+            prescript.delete("1.0", "end")
+            prescript.insert("1.0", prompt_drafts[route])
+            custom_name.set(route_preset_names[route])
+            refresh_custom_presets()
+            custom_status.set(prompt_route_var.get() + " preprompt ready")
+            if route == "local" and notify_local:
+                local_ai_notice()
+
+        def on_prompt_route_selected(_event=None):
+            switch_prompt_route(route_labels[prompt_route_var.get()])
+
+        prompt_route_picker.bind("<<ComboboxSelected>>", on_prompt_route_selected)
+
+        def save_custom_preprompt():
+            try:
+                route = active_prompt_route[0]
+                path = custom_prompt_path(custom_name.get(), route)
+                content = prescript.get("1.0", "end-1c")
+                if not content.strip():
+                    raise ValueError("The preprompt editor is empty.")
+                if len(content) > 100_000:
+                    raise ValueError("Custom preprompts are limited to 100,000 characters.")
+                if path.exists() and not messagebox.askyesno(
+                        "Overwrite custom preset?", f"Replace existing preset '{custom_name.get().strip()}'?",
+                        parent=window):
+                    return
+                PROMPT_FOLDER.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(".txt.tmp")
+                temporary.write_text(content, encoding="utf-8")
+                temporary.replace(path)
+                prompt_drafts[route] = content
+                refresh_custom_presets()
+                custom_status.set("Saved: " + path.name)
+            except (ValueError, OSError) as exc:
+                messagebox.showerror("Save Custom", str(exc), parent=window)
+
+        def load_custom_preprompt():
+            try:
+                route = active_prompt_route[0]
+                selected = builder_list_prompt_presets(choice, route)
+                path = selected.get(custom_name.get().strip())
+                if path is None or not path.is_file() or path.is_symlink():
+                    raise FileNotFoundError("Choose an existing preset from the dropdown.")
+                content = path.read_text(encoding="utf-8")
+                if not content.strip():
+                    raise ValueError("That saved preprompt is empty.")
+                prescript.delete("1.0", "end")
+                prescript.insert("1.0", content)
+                prompt_drafts[route] = content
+                custom_status.set("Loaded: " + path.name)
+            except (ValueError, OSError) as exc:
+                messagebox.showerror("Load Selected", str(exc), parent=window)
+
+        ttk.Button(prompt_controls, text="Save Custom", command=save_custom_preprompt).pack(side="left", padx=(0, 5))
+        ttk.Button(prompt_controls, text="Load Selected", command=load_custom_preprompt).pack(side="left", padx=(0, 5))
+        ttk.Label(top, textvariable=custom_status, foreground="#555555").pack(anchor="w")
+        refresh_custom_presets()
 
         config_row = ttk.Frame(body)
         config_row.pack(fill="x", pady=(2, 5))
@@ -1138,8 +1955,14 @@ def run_gui():
                       ["1 GB", "2 GB", "4 GB", "8 GB", "16 GB", "32 GB"], width=12)
         labeled_combo(config_row, "App RAM limit", appram_var,
                       ["64 MB", "128 MB", "256 MB", "512 MB", "1024 MB", "2048 MB"], width=13)
-        labeled_combo(config_row, "AI destination", route_var,
-                      ["Local AI", "API AI"], width=14, readonly=True)
+        destination_picker = labeled_combo(config_row, "AI destination", route_var,
+                                           ["Local AI", "API AI"], width=14, readonly=True)
+
+        def on_ai_destination_selected(_event=None):
+            route = "local" if route_var.get() == "Local AI" else "api"
+            switch_prompt_route(route)
+
+        destination_picker.bind("<<ComboboxSelected>>", on_ai_destination_selected)
 
         second_row = ttk.Frame(body)
         second_row.pack(fill="x", pady=(0, 6))
@@ -1147,8 +1970,25 @@ def run_gui():
         project_group.pack(side="left", fill="x", expand=True, padx=(0, 14))
         ttk.Label(project_group, text="Project folder name (under data/builder_projects)").pack(anchor="w")
         ttk.Entry(project_group, textvariable=project_var, width=45).pack(fill="x", pady=(2, 0))
-        labeled_combo(second_row, "Interval between steps (seconds)", interval_var,
-                      ["0", "1", "1.2", "3", "5", "13", "30"], width=14)
+
+        def open_route_folder(route: str):
+            """Open the route workspace, independent of the currently selected AI."""
+            try:
+                directory = builder_route_directory(route)
+                directory.mkdir(parents=True, exist_ok=True)
+                if sys.platform == "win32":
+                    os.startfile(str(directory))
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", str(directory)])
+                else:
+                    subprocess.Popen(["xdg-open", str(directory)])
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Open Builder folder", str(exc), parent=window)
+
+        ttk.Button(second_row, text="Open API Folder",
+                   command=lambda: open_route_folder("api")).pack(side="right", padx=(5, 0), pady=(15, 0))
+        ttk.Button(second_row, text="Open Local Folder",
+                   command=lambda: open_route_folder("local")).pack(side="right", padx=(5, 0), pady=(15, 0))
 
         ttk.Label(body, text="Your application request").pack(anchor="w")
         user_prompt = tk.Text(body, height=4, wrap="word", undo=True)
@@ -1162,10 +2002,42 @@ def run_gui():
         start_button.pack(side="left", padx=(0, 7))
         stop_button = ttk.Button(control_row, text="Stop", state="disabled")
         stop_button.pack(side="left", padx=(0, 7))
-        verify_button = ttk.Button(control_row, text="Verify files")
-        verify_button.pack(side="left")
         stage = tk.StringVar(value="Connect a Resident, enter a request, then ask for steps.")
         ttk.Label(body, textvariable=stage, wraplength=920).pack(anchor="w", pady=(0, 7))
+
+        # Onscreen is a single-route, fully automatic OCR -> plan -> injector path.
+        # Region is selected by dragging a screen rectangle, input by clicking the AI.
+        screen_frame = ttk.LabelFrame(body, text="Onscreen Builder / Select, Start, Inject", padding=6)
+        screen_frame.pack(fill="x", pady=(2, 6))
+        screen_status = tk.StringVar(value="1. Select the AI response region.  2. Write a request.  3. Start, then click the AI input box.")
+        screen_controls = ttk.Frame(screen_frame)
+        screen_controls.pack(fill="x", pady=(1, 5))
+        screen_select_button = ttk.Button(screen_controls, text="Select region (draw rectangle)")
+        screen_select_button.pack(side="left", padx=(0, 6))
+        screen_start_button = ttk.Button(screen_controls, text="Start")
+        screen_start_button.pack(side="left", padx=(0, 6))
+        screen_pause_button = ttk.Button(screen_controls, text="Pause / Resume")
+        screen_pause_button.pack(side="left", padx=(0, 6))
+        screen_stop_button = ttk.Button(screen_controls, text="Stop")
+        screen_stop_button.pack(side="left", padx=(0, 6))
+        screen_reset_button = ttk.Button(screen_controls, text="Reset")
+        screen_reset_button.pack(side="left")
+        screen_interval_row = ttk.Frame(screen_frame)
+        screen_interval_row.pack(fill="x", pady=(2, 5))
+        ttk.Label(screen_interval_row, text="Injection interval (seconds):").pack(side="left", padx=(0, 8))
+        screen_interval_picker = ttk.Combobox(
+            screen_interval_row, textvariable=interval_var,
+            values=["0", "1", "1.2", "3", "5", "10", "13", "20", "30", "60", "120", "180", "240", "300", "420", "480", "600", "720", "900"], width=9)
+        screen_interval_picker.pack(side="left")
+        ttk.Label(screen_interval_row, text="Editable. Affects both onscreen and connected Resident step injection.").pack(side="left", padx=10)
+        ttk.Label(screen_frame, textvariable=screen_status, wraplength=940).pack(anchor="w")
+        ttk.Label(screen_frame,
+                  text="After sending the request, Monitor jumps to the newest response and keeps "
+                       "scrolling the selected chat area until OCR completes. "
+                       "Echoed preprompt steps are filtered. "
+                       "OCR begins 5 seconds later. After 20 seconds without new numbered lines, "
+                       "the collected plan is injected at the interval selected above.",
+                  wraplength=940).pack(anchor="w", pady=(3, 0))
 
         output_panes = ttk.Panedwindow(body, orient="vertical")
         output_panes.pack(fill="both", expand=True)
@@ -1218,8 +2090,8 @@ def run_gui():
                 seconds = float(interval_var.get())
             except ValueError:
                 raise ValueError("Interval must be a number of seconds") from None
-            if not 0 <= seconds <= 300:
-                raise ValueError("Interval must be between 0 and 300 seconds")
+            if not 0 <= seconds <= 900:
+                raise ValueError("Interval must be between 0 and 900 seconds")
             channel = "local" if route_var.get() == "Local AI" else "api"
             resident_info = channels[channel]
             if not resident_info["connected"] or not resident_info["config"]:
@@ -1227,8 +2099,8 @@ def run_gui():
             return {
                 "request": prompt, "os": os_var.get(), "system_ram": sysram_var.get(),
                 "app_ram": appram_var.get(), "route": channel, "interval": seconds,
-                "folder": BUILDER_PROJECTS / folder_name,
-                "preprompt": prescript.get("1.0", "end-1c").strip(),
+                "folder": builder_project_directory(channel, folder_name),
+                "preprompt": current_prompt_text(channel).strip(),
                 "resident_config": resident_info["config"].copy(),
                 "connection_generation": resident_info["generation"],
                 "category": choice,
@@ -1258,6 +2130,11 @@ def run_gui():
             threading.Thread(target=work, daemon=True).start()
 
         def request_plan():
+            selected_route = "local" if route_var.get() == "Local AI" else "api"
+            if active_prompt_route[0] != selected_route:
+                switch_prompt_route(selected_route)
+            elif selected_route == "local":
+                local_ai_notice()
             try:
                 values = validate_inputs()
             except ValueError as exc:
@@ -1275,6 +2152,17 @@ def run_gui():
             job["interval"] = values["interval"]
             job["settings"] = values
             job["history"] = []
+            try:
+                builder_prepare_route_project(values["route"], values["folder"].name)
+                # Preserve the exact request and selected preprompt for this run.
+                builder_record_response(job["folder"], "responses/request.txt", values["request"])
+                builder_record_response(job["folder"], "responses/preprompt.txt", values["preprompt"])
+            except (OSError, ValueError) as exc:
+                job["busy"] = False
+                stage.set("Project folder could not be created: " + str(exc))
+                messagebox.showerror("Builder workspace", str(exc), parent=window)
+                control_state()
+                return
             plan_view.delete("1.0", "end")
             stage.set("Planning with " + ("Local AI" if job["route"] == "local" else "API AI") + "...")
             activity_line(f"REQUEST: {values['request']}\n{job['context']}")
@@ -1325,8 +2213,15 @@ def run_gui():
             index = job["step_index"]
             if index >= len(job["steps"]):
                 job["running"] = False
-                stage.set(f"All {len(job['steps'])} instructions processed. Check the verification results.")
+                stage.set(f"All {len(job['steps'])} instructions processed. Files are in the {job['route'].upper()} folder.")
                 activity_line("FINAL STATIC CHECK\n" + builder_verify_files(job["folder"]))
+                if job["route"] == "api":
+                    try:
+                        package = builder_pack_api_project(job["folder"])
+                        activity_line("API PROJECT ZIP CREATED: " + str(package))
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        activity_line("API ZIP PACKAGING ERROR: " + str(exc))
+                        stage.set("Steps completed, but the API project ZIP failed: " + str(exc))
                 log(f"Builder {choice} completed {len(job['steps'])} injected steps")
                 control_state()
                 return
@@ -1364,14 +2259,6 @@ def run_gui():
             activity_line("STOP requested by operator.")
             control_state()
 
-        def verify_now():
-            name = project_var.get().strip()
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,70}", name):
-                messagebox.showerror("DINS Builder", "Enter a valid project folder name", parent=window)
-                return
-            root = BUILDER_PROJECTS / name
-            activity_line("MANUAL STATIC CHECK\n" + builder_verify_files(root))
-
         def poll_builder_events():
             if not window.winfo_exists():
                 return
@@ -1388,6 +2275,11 @@ def run_gui():
                         control_state()
                         continue
                     if phase == "plan":
+                        try:
+                            builder_record_response(job["folder"], "instructions/plan.txt" if job["route"] == "api"
+                                                    else "responses/plan.txt", reply)
+                        except (OSError, ValueError) as exc:
+                            activity_line("PLAN SAVE ERROR: " + str(exc))
                         plan_view.delete("1.0", "end")
                         plan_view.insert("1.0", reply)
                         try:
@@ -1400,6 +2292,12 @@ def run_gui():
                     elif phase == "step":
                         activity_line("AI STEP REPLY:\n" + reply[:9000])
                         try:
+                            builder_record_response(job["folder"],
+                                f"responses/step_{job['step_index'] + 1:03d}.txt", reply)
+                            if job["route"] == "api":
+                                builder_record_response(job["folder"],
+                                    f"instructions/step_{job['step_index'] + 1:03d}.txt",
+                                    job["steps"][job["step_index"]])
                             actions, report = builder_decode_actions(reply)
                             # Validate all paths BEFORE asking permission, and reveal overwrites.
                             paths = []
@@ -1443,15 +2341,537 @@ def run_gui():
                 pass
             window.after(120, poll_builder_events)
 
+        # ONSCREEN PIPELINE: draw response rectangle -> submit request -> scroll the
+        # selected chat response area -> start OCR after 5s -> 20s quiet -> inject plan.
+        # No coordinate, poll-rate, or countdown boxes are required.
+        screen_state = {
+            "generation": 0, "phase": "idle", "paused": False, "pause_at": None,
+            "region": None, "target": None, "target_hwnd": None,
+            "collected": {}, "pending": [], "last_change": 0.0,
+            "busy": False, "sending": False, "last_send": 0.0,
+            "interval": 3.0, "prompt": "", "preprompt": "", "selected_at": 0.0,
+            "mouse_was_down": False, "last_read": 0.0,
+            "request_sent_at": 0.0, "last_scroll": 0.0,
+            "echo_warning_shown": False,
+        }
+        screen_events: queue.Queue = queue.Queue()
+        # The only child PIDs owned by onscreen Builder are OCR subprocesses.
+        # Tkinter/injector threads belong to Monitor's own process and cannot
+        # be safely PID-killed without closing Monitor itself.
+        screen_pid_cleaner = BuilderPIDCleaner()
+        builder_pid_cleaners.append(screen_pid_cleaner)
+        OCR_POLL_SECONDS = 1.5
+        QUIET_SECONDS = 20.0
+        INPUT_CLICK_SECONDS = 10.0  # fixed safety window, not another UI setting
+        OCR_START_DELAY_SECONDS = 5.0  # wait for the answer after initial injection
+        # Native Windows mouse-wheel pulses scroll the chosen chat viewport quickly.
+        # PyAutoGUI turns a 50-tick request into 50 slow individual mouse events.
+        RESPONSE_SCROLL_INTERVAL_SECONDS = 0.35
+        RESPONSE_SCROLL_TICKS = 40    # per pulse when following live output
+        RESPONSE_INITIAL_TICKS = 96  # per pulse when jumping past the prompt
+
+
+        def windows_window_at(point):
+            """Return top-level Windows HWND and process ID at screen position."""
+            import ctypes
+            from ctypes import wintypes
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+            u = ctypes.windll.user32
+            u.WindowFromPoint.argtypes = [POINT]
+            u.WindowFromPoint.restype = wintypes.HWND
+            u.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+            u.GetAncestor.restype = wintypes.HWND
+            u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+            u.GetWindowThreadProcessId.restype = wintypes.DWORD
+            hwnd = u.WindowFromPoint(POINT(int(point[0]), int(point[1])))
+            if not hwnd:
+                return None, None
+            root_hwnd = u.GetAncestor(hwnd, 2) or hwnd  # GA_ROOT
+            process_id = wintypes.DWORD()
+            u.GetWindowThreadProcessId(root_hwnd, ctypes.byref(process_id))
+            return int(root_hwnd), int(process_id.value)
+
+        def windows_mouse_snapshot():
+            """Read global mouse-button state without requiring pynput."""
+            import ctypes
+            from ctypes import wintypes
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+            u = ctypes.windll.user32
+            pointer = POINT()
+            u.GetCursorPos(ctypes.byref(pointer))
+            left_down = bool(u.GetAsyncKeyState(0x01) & 0x8000)
+            return left_down, (int(pointer.x), int(pointer.y))
+
+        def select_ocr_region():
+            if screen_state["phase"] in ("await_click", "sending_prompt", "watching", "injecting"):
+                messagebox.showinfo("Onscreen Builder", "Stop the current run before changing the region.", parent=window)
+                return
+            try:
+                from PIL import ImageGrab, ImageTk
+                if sys.platform != "win32":
+                    raise RuntimeError("The multi-monitor drag selector currently requires Windows.")
+                import ctypes
+                u = ctypes.windll.user32
+                # Virtual desktop can start at negative X when monitor two is left.
+                origin_x = u.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+                origin_y = u.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+                screenshot = ImageGrab.grab(all_screens=True)
+                width, height = screenshot.size
+            except Exception as exc:
+                messagebox.showerror("Select region", f"Cannot capture screens: {exc}", parent=window)
+                return
+            selector = tk.Toplevel(app)
+            selector.overrideredirect(True)
+            selector.attributes("-topmost", True)
+            selector.configure(cursor="crosshair")
+            # Initially place the overlay, then enforce negative monitor coordinates.
+            selector.geometry(f"{width}x{height}+0+0")
+            selector.update_idletasks()
+            try:
+                from ctypes import wintypes
+                u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                           ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+                u.SetWindowPos.restype = wintypes.BOOL
+                raw_hwnd = selector.wm_frame()
+                hwnd = int(raw_hwnd, 0) if isinstance(raw_hwnd, str) else int(raw_hwnd)
+                if not u.SetWindowPos(hwnd, -1, origin_x, origin_y, width, height, 0x0040):
+                    raise OSError("Could not position selection overlay")
+            except (OSError, ValueError, TypeError):
+                selector.geometry(f"{width}x{height}{origin_x:+d}{origin_y:+d}")
+            canvas = tk.Canvas(selector, width=width, height=height, highlightthickness=0,
+                               cursor="crosshair")
+            canvas.pack(fill="both", expand=True)
+            photo = ImageTk.PhotoImage(screenshot)
+            canvas.image_ref = photo
+            canvas.create_image(0, 0, anchor="nw", image=photo)
+            canvas.create_text(28, 26, anchor="nw", text="Drag around the AI response area. Esc cancels.",
+                               font=("Segoe UI", 18, "bold"), fill="#00F4D0")
+            drag = {"x": None, "y": None, "box": None}
+
+            def begin(event):
+                drag["x"], drag["y"] = event.x, event.y
+                if drag["box"] is not None:
+                    canvas.delete(drag["box"])
+                drag["box"] = canvas.create_rectangle(event.x, event.y, event.x, event.y,
+                                                       outline="#00F4D0", width=3)
+
+            def move(event):
+                if drag["box"] is not None:
+                    canvas.coords(drag["box"], drag["x"], drag["y"], event.x, event.y)
+
+            def finish(event):
+                if drag["x"] is None:
+                    return
+                x1 = max(0, min(width, min(drag["x"], event.x)))
+                x2 = max(0, min(width, max(drag["x"], event.x)))
+                y1 = max(0, min(height, min(drag["y"], event.y)))
+                y2 = max(0, min(height, max(drag["y"], event.y)))
+                selector.destroy()
+                if x2 - x1 < 50 or y2 - y1 < 35:
+                    screen_status.set("Selection too small. Drag a rectangle around the numbered response.")
+                    return
+                screen_state["region"] = (origin_x + x1, origin_y + y1, x2-x1, y2-y1)
+                screen_status.set(f"Region selected: {x2-x1} x {y2-y1} pixels. Enter the request and click Start.")
+                activity_line(f"ONSCREEN: OCR rectangle selected ({x2-x1} x {y2-y1} pixels).")
+
+            canvas.bind("<ButtonPress-1>", begin)
+            canvas.bind("<B1-Motion>", move)
+            canvas.bind("<ButtonRelease-1>", finish)
+            selector.bind("<Escape>", lambda _e: selector.destroy())
+            selector.focus_force()
+
+        def screen_paste(text):
+            """Send complete multiline text via Ctrl+V. The user chooses the target by click."""
+            import pyautogui
+            target = screen_state["target"]
+            if target is None:
+                raise RuntimeError("No AI input click recorded")
+            if sys.platform == "win32":
+                hwnd, owner_pid = windows_window_at(target)
+                if not hwnd or hwnd != screen_state["target_hwnd"] or owner_pid == os.getpid():
+                    raise RuntimeError("Target window moved or changed. Stopped to avoid typing into another app.")
+            pyautogui.FAILSAFE = True
+            app.clipboard_clear()
+            app.clipboard_append(text)
+            app.update_idletasks()
+            pyautogui.click(*target)
+            time.sleep(0.10)
+            pyautogui.hotkey("ctrl", "v")
+            time.sleep(0.25)  # let the receiving app process the paste before Enter
+            pyautogui.press("enter")
+
+        def screen_scroll_response(*, initial=False):
+            """Snap chat to the newest output and follow it until OCR finishes.
+
+            The wheel targets the previously selected response rectangle, never
+            the input field. A native Windows mouse-wheel event moves multiple
+            detents in a single system event, avoiding PyAutoGUI's per-tick loop.
+            Keep the original window-owner check to prevent scrolling other apps.
+            """
+            s = screen_state
+            region = s["region"]
+            if not region or s["phase"] != "watching" or s["paused"]:
+                return
+            x, y, width, height = region
+            response_point = (x + width // 2, y + height // 2)
+            if sys.platform == "win32":
+                hwnd, owner_pid = windows_window_at(response_point)
+                if (not hwnd or hwnd != s["target_hwnd"] or owner_pid == os.getpid()):
+                    raise RuntimeError(
+                        "Selected OCR response area is no longer in the chosen AI window. "
+                        "Stop or restore the chat window before continuing.")
+            import pyautogui
+            pyautogui.FAILSAFE = True
+            pyautogui.moveTo(*response_point, duration=0)
+            if sys.platform == "win32":
+                import ctypes
+                user32 = ctypes.windll.user32
+                # MOUSEEVENTF_WHEEL = 0x0800, WHEEL_DELTA = 120.
+                # Tesseract and GUI processing should not wait for hundreds of
+                # individually simulated wheel ticks.
+                # IMPORTANT: Do not set argtypes on this shared Windows function.
+                # PyAutoGUI also calls ctypes.windll.user32.mouse_event for
+                # clicks, passing ctypes.c_long mouse coordinates. Overriding
+                # argtypes here makes the NEXT click fail with:
+                # "argument 2: TypeError: wrong type".
+                # Native wheel messages work without altering the signature.
+                per_pulse = RESPONSE_INITIAL_TICKS if initial else RESPONSE_SCROLL_TICKS
+                # A few native wheel messages handle long chat histories; future
+                # pulses keep the newest AI response inside the OCR rectangle.
+                pulses = 3 if initial else 2
+                wheel_delta = (-120 * per_pulse) & 0xFFFFFFFF
+                for _ in range(pulses):
+                    user32.mouse_event(0x0800, 0, 0, wheel_delta, 0)
+            else:
+                # Non-Windows fallback; onscreen selection currently needs Windows.
+                pyautogui.scroll(-(RESPONSE_INITIAL_TICKS if initial else RESPONSE_SCROLL_TICKS))
+            s["last_scroll"] = time.monotonic()
+
+        def screen_read():
+            if screen_state["busy"] or screen_state["phase"] != "watching" or screen_state["paused"]:
+                return
+            screen_state["busy"] = True
+            generation = screen_state["generation"]
+            region = screen_state["region"]
+            pid_epoch = screen_pid_cleaner.current_epoch()
+            def work():
+                try:
+                    screen_events.put((generation, True, builder_ocr_capture(
+                        region, pid_cleaner=screen_pid_cleaner, pid_epoch=pid_epoch)))
+                except Exception as exc:
+                    screen_events.put((generation, False, str(exc)))
+            threading.Thread(target=work, daemon=True).start()
+
+        def screen_send_next():
+            s = screen_state
+            if s["phase"] != "injecting" or s["paused"] or s["sending"] or not s["pending"]:
+                return
+            if time.monotonic() - s["last_send"] < s["interval"]:
+                return
+            index, instruction = s["pending"][0]
+            s["sending"] = True
+            try:
+                screen_paste(f"{index}. {instruction}")
+            except Exception as exc:
+                s["paused"] = True
+                s["pause_at"] = time.monotonic()
+                screen_status.set(f"Injection paused: {exc}")
+                activity_line(f"ONSCREEN INJECTION ERROR: {exc}")
+            else:
+                s["pending"].pop(0)
+                s["last_send"] = time.monotonic()
+                activity_line(f"INJECTED {index}: {instruction}")
+                if not s["pending"]:
+                    s["phase"] = "finished"
+                    screen_status.set(f"Finished injecting {len(s['collected'])} numbered steps.")
+                    log(f"Onscreen Builder {choice}: {len(s['collected'])} steps injected")
+                else:
+                    screen_status.set(f"Injected {index}. {len(s['pending'])} remaining. Next in {s['interval']:g}s.")
+            finally:
+                s["sending"] = False
+
+        def screen_start():
+            s = screen_state
+            if s["phase"] in ("await_click", "sending_prompt", "watching", "injecting"):
+                return
+            if not s["region"]:
+                messagebox.showerror("Onscreen Builder", "Click Select region and draw a rectangle first.", parent=window)
+                return
+            request = user_prompt.get("1.0", "end-1c").strip()
+            if not request:
+                messagebox.showerror("Onscreen Builder", "Enter your application request first.", parent=window)
+                return
+            # Minus Alex-style PID cleanup BEFORE starting a new Builder run.
+            # Only owned Tesseract PIDs are eligible; never kill the target AI.
+            cleaned_pids = screen_pid_cleaner.clean()
+            activity_line("ONSCREEN PID CLEANER: " +
+                          ("stopped owned OCR PIDs " + ", ".join(map(str, cleaned_pids))
+                           if cleaned_pids else "no leftover OCR process"))
+            try:
+                interval = float(interval_var.get())
+                if not 0 <= interval <= 900:
+                    raise ValueError("Injection interval must be 0 to 900 seconds")
+                if sys.platform != "win32":
+                    raise RuntimeError("Automatic external-click capture is currently Windows-only")
+                import pyautogui
+                from PIL import ImageGrab
+                # First search the portable OCR folder beside Monitor; then PATH.
+                found_tesseract = builder_find_tesseract()
+                if not found_tesseract:
+                    from tkinter import filedialog
+                    chosen_exe = filedialog.askopenfilename(
+                        parent=window, title="Locate your existing Tesseract OCR installation",
+                        filetypes=[("Tesseract OCR", "tesseract.exe"), ("Executables", "*.exe")],
+                        initialdir=str(ROOT / "ocr" if (ROOT / "ocr").is_dir() else ROOT))
+                    if not chosen_exe:
+                        screen_status.set("Tesseract executable not selected; Start cancelled.")
+                        return
+                    found_tesseract = builder_set_tesseract_path(chosen_exe, remember=True)
+                else:
+                    builder_set_tesseract_path(found_tesseract)
+                # Check the language file BEFORE sending anything to the AI.
+                # Tesseract --version succeeds even if the English OCR data is missing.
+                language_dir = builder_find_tessdata(found_tesseract)
+                if language_dir is None:
+                    from tkinter import filedialog
+                    chosen_data = filedialog.askopenfilename(
+                        parent=window,
+                        title="Locate eng.traineddata (English OCR language data)",
+                        initialdir=str(ROOT / "ocr" if (ROOT / "ocr").is_dir() else ROOT),
+                        filetypes=[("English OCR data", "eng.traineddata"),
+                                   ("Traineddata files", "*.traineddata")])
+                    if not chosen_data:
+                        screen_status.set("English OCR language file missing; Start cancelled before sending request.")
+                        return
+                    language_dir = builder_set_tessdata_path(chosen_data, remember=True)
+                # Exercise the exact OCR launch before sending anything to the AI.
+                # Existence checks alone cannot detect broken Tesseract CLI arguments.
+                from PIL import Image, ImageDraw
+                probe = Image.new("RGB", (210, 60), "white")
+                ImageDraw.Draw(probe).text((10, 12), "DINS OCR TEST", fill="black")
+                builder_tesseract_ocr(
+                    probe, found_tesseract, language_dir,
+                    pid_cleaner=screen_pid_cleaner,
+                    pid_epoch=screen_pid_cleaner.current_epoch())
+                activity_line("ONSCREEN: Tesseract OCR preflight passed: " + found_tesseract)
+                activity_line("ONSCREEN: English language data ready: " + str(language_dir))
+            except (ValueError, ImportError, RuntimeError) as exc:
+                messagebox.showerror("Onscreen Builder", str(exc), parent=window)
+                return
+            # An Onscreen run does NOT need Local/API Resident connectivity.
+            # Existing Resident Builder buttons above remain independent.
+            preprompt = current_prompt_text("onscreen").strip()
+            constraints = (f"TARGET OS: {os_var.get()}\nSYSTEM RAM: {sysram_var.get()}\n"
+                           f"APP RAM BUDGET: {appram_var.get()}\nBUILD MODE: {choice}")
+            ask = (preprompt + "\n\n" + constraints + "\n\nUSER REQUEST:\n" + request +
+                   "\n\nPLAN MODE: Return ONLY consecutively numbered, actionable instruction "
+                   "lines starting at 1. Use one blank line between steps. "
+                   "Do not return code, headings, Markdown fences or explanations. "
+                   "Wait for each numbered instruction to be returned to you separately.")
+            s.update(generation=s["generation"] + 1, phase="await_click", paused=False,
+                     pause_at=None, target=None, target_hwnd=None, collected={}, pending=[],
+                     last_change=0.0, busy=False, sending=False, last_send=0.0,
+                     interval=interval, prompt=ask, preprompt=preprompt,
+                     selected_at=time.monotonic(),
+                     request_sent_at=0.0, last_scroll=0.0, last_read=0.0,
+                     echo_warning_shown=False)
+            s["mouse_was_down"], _pos = windows_mouse_snapshot()
+            screen_status.set("Click the AI input box now (within 10 seconds). The request will send automatically.")
+            activity_line("ONSCREEN: waiting for click on the AI input field; region already selected.")
+
+        def screen_pause_resume():
+            s = screen_state
+            if s["phase"] not in ("watching", "injecting"):
+                return
+            if s["paused"]:
+                duration = time.monotonic() - (s["pause_at"] or time.monotonic())
+                if s["last_change"]:
+                    s["last_change"] += duration
+                if s["last_send"]:
+                    s["last_send"] += duration
+                if s["request_sent_at"]:
+                    s["request_sent_at"] += duration
+                if s["last_scroll"]:
+                    s["last_scroll"] += duration
+                s["paused"] = False
+                s["pause_at"] = None
+                screen_status.set("Resumed " + s["phase"] + ".")
+            else:
+                s["paused"] = True
+                s["pause_at"] = time.monotonic()
+                screen_status.set("Paused. OCR plan and injection queue retained.")
+
+        def screen_stop():
+            s = screen_state
+            s["generation"] += 1
+            cleaned_pids = screen_pid_cleaner.clean()
+            if cleaned_pids:
+                activity_line("ONSCREEN PID CLEANER: stopped owned OCR PIDs " +
+                              ", ".join(map(str, cleaned_pids)))
+            s.update(phase="stopped", paused=False, busy=False, sending=False)
+            screen_status.set(f"Stopped. {len(s['collected'])} detected plan lines remain until Reset.")
+
+        def screen_reset():
+            screen_stop()
+            screen_state.update(phase="idle", collected={}, pending=[], last_change=0.0,
+                                target=None, target_hwnd=None,
+                                request_sent_at=0.0, last_scroll=0.0)
+            screen_status.set("Reset. Region retained. Enter a request, then Start and click the AI input.")
+            plan_view.delete("1.0", "end")
+
+        def screen_tick():
+            if not window.winfo_exists():
+                return
+            s = screen_state
+            now = time.monotonic()
+            try:
+                if s["phase"] == "await_click":
+                    if now - s["selected_at"] >= INPUT_CLICK_SECONDS:
+                        s["phase"] = "stopped"
+                        screen_status.set("No AI input click captured within 10s. Press Start and try again.")
+                    else:
+                        down, position = windows_mouse_snapshot()
+                        if s["mouse_was_down"] and not down:
+                            hwnd, owner_pid = windows_window_at(position)
+                            if hwnd and owner_pid != os.getpid():
+                                s["target"] = position
+                                s["target_hwnd"] = hwnd
+                                s["phase"] = "sending_prompt"
+                                screen_status.set("AI input selected. Sending preprompt and request...")
+                                # Delay gives the target app time to take keyboard focus.
+                                window.after(250, screen_dispatch_prompt)
+                        s["mouse_was_down"] = down
+                        if s["phase"] == "await_click":
+                            remaining = max(0, int(INPUT_CLICK_SECONDS - (now - s["selected_at"])) + 1)
+                            screen_status.set(f"Click the AI input field now. {remaining}s remaining.")
+                elif s["phase"] == "watching" and not s["paused"]:
+                    # Keep the latest AI output visible. Never scroll while a
+                    # screenshot/OCR capture is in progress.
+                    if (not s["busy"] and
+                            now - s["last_scroll"] >= RESPONSE_SCROLL_INTERVAL_SECONDS):
+                        screen_scroll_response()
+                    # OCR starts exactly 5s after the preprompt + request are sent.
+                    if now - s["request_sent_at"] < OCR_START_DELAY_SECONDS:
+                        remaining = OCR_START_DELAY_SECONDS - (now - s["request_sent_at"])
+                        screen_status.set(f"Request sent; scrolling response. OCR starts in {remaining:.1f}s.")
+                    else:
+                        if not s["busy"] and now - s["last_read"] >= OCR_POLL_SECONDS:
+                            s["last_read"] = now
+                            screen_read()
+                    if (now - s["request_sent_at"] >= OCR_START_DELAY_SECONDS and
+                            not s["busy"] and builder_ocr_plan_ready(s["collected"], s["last_change"], now, QUIET_SECONDS)):
+                        s["pending"] = sorted(s["collected"].items())
+                        s["phase"] = "injecting"
+                        s["last_send"] = 0.0
+                        activity_line(f"OCR PLAN QUIET FOR 20s: {len(s['pending'])} lines loaded into injector.")
+                        screen_status.set(f"Plan collected ({len(s['pending'])} steps). Injection begins now.")
+                    elif s["collected"]:
+                        elapsed = min(QUIET_SECONDS, now - s["last_change"])
+                        missing = sorted(set(range(1, max(s["collected"]) + 1)) - set(s["collected"]))
+                        if missing:
+                            screen_status.set(f"Found {len(s['collected'])} lines; waiting for missing numbers: {missing[:8]}")
+                        else:
+                            screen_status.set(f"Found {len(s['collected'])} numbered lines. Quiet timer: {elapsed:.0f}/20s.")
+                elif s["phase"] == "injecting" and not s["paused"]:
+                    screen_send_next()
+            except Exception as exc:
+                s["paused"] = True
+                screen_status.set("Onscreen paused: " + str(exc))
+                activity_line("ONSCREEN ERROR: " + str(exc))
+            window.after(25 if s["phase"] == "await_click" else 100, screen_tick)
+
+        def screen_dispatch_prompt():
+            s = screen_state
+            if s["phase"] != "sending_prompt":
+                return
+            try:
+                screen_paste(s["prompt"])
+            except Exception as exc:
+                s["phase"] = "stopped"
+                screen_status.set("Request not injected: " + str(exc))
+                activity_line("ONSCREEN REQUEST ERROR: " + str(exc))
+            else:
+                s["phase"] = "watching"
+                s["request_sent_at"] = time.monotonic()
+                s["last_scroll"] = 0.0
+                s["last_read"] = 0.0
+                activity_line("ONSCREEN: preprompt + request submitted to chosen AI input.")
+                screen_status.set("Request sent. Scrolling response area; OCR starts in 5 seconds...")
+                # Start scrolling immediately after the first (request) injection.
+                try:
+                    screen_scroll_response(initial=True)
+                    activity_line("ONSCREEN: automatic chat scrolling started; OCR begins after 5s.")
+                except Exception as exc:
+                    s["paused"] = True
+                    s["pause_at"] = time.monotonic()
+                    activity_line("ONSCREEN SCROLL ERROR: " + str(exc))
+                    screen_status.set("Paused: response scrolling failed. " + str(exc))
+
+        def screen_poll_events():
+            if not window.winfo_exists():
+                return
+            try:
+                while True:
+                    generation, ok, payload = screen_events.get_nowait()
+                    if generation != screen_state["generation"]:
+                        continue
+                    screen_state["busy"] = False
+                    if ok:
+                        if screen_state["phase"] != "watching":
+                            continue
+                        seen_lines = builder_ocr_numbered(payload)
+                        seen_lines, ignored = builder_ocr_filter_preprompt(
+                            seen_lines, screen_state.get("preprompt", ""))
+                        # A plan without step 1 is not an actionable response.
+                        # Ignore prior-chat steps until OCR actually sees a valid
+                        # first step; do not enqueue contaminated partial lists.
+                        if 1 not in screen_state["collected"]:
+                            first = next((text for n, text in seen_lines if n == 1), None)
+                            if first is None:
+                                seen_lines = []
+                            else:
+                                seen_lines = [(n, t) for n, t in seen_lines if n >= 1]
+                        if ignored and not screen_state.get("echo_warning_shown"):
+                            activity_line("ONSCREEN: ignored echoed preprompt instructions in OCR.")
+                            screen_state["echo_warning_shown"] = True
+                        if builder_merge_ocr_lines(screen_state["collected"], seen_lines):
+                            screen_state["last_change"] = time.monotonic()
+                            ordered = sorted(screen_state["collected"].items())
+                            plan_view.delete("1.0", "end")
+                            plan_view.insert("1.0", "\n\n".join(f"{n}. {text}" for n, text in ordered))
+                            activity_line(f"OCR plan updated: {len(ordered)} numbered steps detected.")
+                    else:
+                        screen_state["paused"] = True
+                        screen_state["pause_at"] = time.monotonic()
+                        screen_status.set("OCR failed; paused: " + str(payload))
+                        activity_line("OCR ERROR: " + str(payload))
+            except queue.Empty:
+                pass
+            window.after(150, screen_poll_events)
+
+        screen_select_button.configure(command=select_ocr_region)
+        screen_start_button.configure(command=screen_start)
+        screen_pause_button.configure(command=screen_pause_resume)
+        screen_stop_button.configure(command=screen_stop)
+        screen_reset_button.configure(command=screen_reset)
+        window.after(80, screen_tick)
+        window.after(150, screen_poll_events)
+
         plan_button.configure(command=request_plan)
         start_button.configure(command=start_steps)
         stop_button.configure(command=stop_run)
-        verify_button.configure(command=verify_now)
         control_state()
         window.after(120, poll_builder_events)
 
         def close_builder():
             job["generation"] += 1
+            screen_state["generation"] += 1
+            screen_pid_cleaner.clean()
+            if screen_pid_cleaner in builder_pid_cleaners:
+                builder_pid_cleaners.remove(screen_pid_cleaner)
+            screen_state["running"] = False
             window.destroy()
         window.protocol("WM_DELETE_WINDOW", close_builder)
 
@@ -1884,6 +3304,10 @@ def run_gui():
     refresh_home()
 
     def close_monitor():
+        # Release only processes actually started by Builder before GUI exits.
+        for cleaner in list(builder_pid_cleaners):
+            cleaner.clean()
+        builder_pid_cleaners.clear()
         # Avoid leaving a misleading persistent "connected" state after exit.
         disconnect_resident("local", silent=True)
         disconnect_resident("api", silent=True)
