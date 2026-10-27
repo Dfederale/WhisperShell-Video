@@ -191,6 +191,7 @@ API_PROVIDERS = {
     "Qwen (Alibaba)": {"protocol": "openai", "endpoint": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", "model": "qwen-plus"},
     "OpenAI": {"protocol": "openai", "endpoint": "https://api.openai.com/v1/chat/completions", "model": "gpt-4o-mini"},
     "Nebius": {"protocol": "openai", "endpoint": "https://api.studio.nebius.com/v1/chat/completions", "model": ""},
+    "NVIDIA NIM": {'protocol': 'openai', 'endpoint': 'https://integrate.api.nvidia.com/v1/chat/completions', 'model': ''},
     "Custom (OpenAI-compatible)": {"protocol": "openai", "endpoint": "http://127.0.0.1:8000/v1/chat/completions", "model": ""},
 }
 
